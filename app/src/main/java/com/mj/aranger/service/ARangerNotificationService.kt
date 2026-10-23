@@ -4,6 +4,7 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.mj.aranger.engine.MacroEngine
+import com.mj.aranger.store.MacroRepository
 
 class ARangerNotificationService : NotificationListenerService() {
 
@@ -34,6 +35,7 @@ class ARangerNotificationService : NotificationListenerService() {
         val combined = "$title $text".trim()
 
         if (combined.isNotEmpty()) {
+            MacroRepository.lastNotificationText = combined
             MacroEngine.onNotificationReceived(applicationContext, pkg, combined)
         }
     }

@@ -1,11 +1,11 @@
 {
   "appName": "A-ranger Pro",
   "packageId": "com.mj.aranger",
-  "versionCode": 3,
-  "versionName": "1.2.0",
-  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.2.0.apk",
-  "sha256": "76d43734a5a1ed1dffd132c7bd43c13df7786bb841a683446ac846f3763549b2",
-  "sizeBytes": 5822822,
+  "versionCode": 4,
+  "versionName": "1.3.0",
+  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.3.0.apk",
+  "sha256": "804506de5ef2947786d006dc28bc1eefb727bbf17b79af9908218c8af4f06813",
+  "sizeBytes": 5846046,
   "updatedAt": "2026-10-23",
-  "notes": "• 설정 메뉴 자동 업데이트 센터 탑재: inanimals-1977.web.app 및 GitHub 연동으로 이전 설치 버전에 상관없이 언제나 최신 APK 덮어쓰기 업데이트 지원\n• 실시간 화면 UI 분석기(UI Inspector): 어떤 앱 화면에서든 모든 버튼·글자·숨겨진 View ID·중심 좌표를 스캔하고 1초 만에 매크로로 변환\n• 다중 핀(Multi-Pin) 연속 터치 레코더: 화면 위에 1→2→3→4 번호표를 찍어 연속 터치 매크로 즉시 생성\n• 원클릭 스마트 가드 3종: USB 디버깅/데이터 접근 수락 팝업 자동 허용, 영상/앱 광고 '건너뛰기' 자동 스킵, 화면 꺼짐 방지(Keep Awake)\n• 조건 루프(특정 글자 뜰 때까지 반복 터치), View ID 클릭, 클립보드 즉시 붙여넣기, 매일 정각 스케줄러 및 JSON 전체 백업/복원 지원"
+  "notes": "• 🎨 화면 픽셀 색상 스포이드 & 조건부 터치: 조준기로 찍은 위치의 #RRGGBB 색상을 실시간 추출하고, 특정 색상이 뜰 때만 자동 터치/대기 루프 실행\n• 📹 자유 곡선·패턴 제스처 레코더: 화면 위에 손가락으로 그린 곡선/스와이프/패턴 궤적을 그대로 녹화하여 재현\n• 🔊 볼륨[↓] 버튼 & 스마트폰 흔들기 긴급 정지(Panic Stop): 매크로 실행 중 언제든 볼륨 다운 키를 누르거나 폰을 흔들면 즉시 중단\n• 🛡️ 안티 매크로 우회(Humanizer 모드): 터치 좌표 ±7px, 속도·간격 ±15% 미세 랜덤 변조로 사람 손터치 패턴 구현\n• 🌐 웹훅(Webhook HTTP) 전송 액션: 알림 내용({noti}), 실행 앱({pkg}), 시각({time})을 외부 URL로 자동 전송\n• ♻️ 24시간 무중단 자가 복구 워치독(Self-Healing): OS 절전이나 업데이트로 접근성 서비스가 풀려도 5초 내 자동 복구 및 전 버전 무관 자동 업데이트 지원"
 }

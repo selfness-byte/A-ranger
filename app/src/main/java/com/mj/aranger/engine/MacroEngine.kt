@@ -29,11 +29,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.random.Random
 
 object MacroEngine {
 
@@ -50,6 +55,7 @@ object MacroEngine {
     private var timerLoopJob: Job? = null
     private var lastChargingState: Boolean = false
     private var lastBatteryPercent: Int = 100
+    private var tickCounter: Int = 0
 
     fun startTimerLoop(context: Context) {
         if (timerLoopJob?.isActive == true) return
@@ -60,6 +66,13 @@ object MacroEngine {
         timerLoopJob = scope.launch {
             while (isActive) {
                 delay(1000L)
+                tickCounter++
+
+                // 0. 24/7 자가 복구 워치독: 5초마다 접근성 서비스 활성 상태 점검 및 자동 복구
+                if (tickCounter % 5 == 0 && MacroRepository.isSelfHealingEnabled(appCtx)) {
+                    MacroRepository.ensureSelfHealingAccessibility(appCtx)
+                }
+
                 if (!MacroRepository.isMasterEnabled(appCtx)) continue
 
                 // 1. 충전기 연결 감지
@@ -100,19 +113,44 @@ object MacroEngine {
                         evaluateAndRun(appCtx, rule, "매일 지정 시각 ($targetHm)")
                     }
                 }
+
+                // 5. 화면 특정 좌표 픽셀 색상 일치 트리거 (2초 주기 체크)
+                if (tickCounter % 2 == 0 && !isExecuting) {
+                    val colorRules = allEnabled.filter { it.triggerType == TriggerType.PIXEL_COLOR_MATCH }
+                    val svc = ARangerAccessibilityService.instance
+                    if (svc != null && colorRules.isNotEmpty()) {
+                        for (rule in colorRules) {
+                            val parts = rule.triggerParam.split(",").map { it.trim() }
+                            if (parts.size >= 3) {
+                                val tx = parts[0].toIntOrNull() ?: continue
+                                val ty = parts[1].toIntOrNull() ?: continue
+                                val targetHex = parts[2]
+                                val sampled = svc.samplePixelColor(tx, ty) ?: continue
+                                if (ARangerAccessibilityService.colorsMatch(sampled, targetHex)) {
+                                    evaluateAndRun(appCtx, rule, "픽셀 색상 일치 ($tx,$ty = $sampled)")
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
-    fun stopAllExecutions(context: Context) {
+    fun stopAllExecutions(
+        context: Context,
+        reason: String = "사용자에 의해 실행 중인 매크로가 즉시 중단되었습니다."
+    ) {
         activeExecutionJob?.cancel()
         activeExecutionJob = null
         isExecuting = false
+        vibrateShort(context)
+        showToast(context, "⏹ $reason")
         MacroRepository.addLog(
             context,
             LogEntry(
-                macroName = "실행 중지",
-                message = "사용자에 의해 실행 중인 매크로가 즉시 중단되었습니다.",
+                macroName = "긴급 실행 중지",
+                message = reason,
                 isSuccess = true
             )
         )
@@ -139,6 +177,16 @@ object MacroEngine {
     fun runSingleMacroNow(context: Context, rule: MacroRule) {
         val appCtx = context.applicationContext
         evaluateAndRun(appCtx, rule, "수동 즉시 실행", ignoreCooldown = true, ignoreConstraint = true)
+    }
+
+    fun onDeviceShaken(context: Context) {
+        if (!MacroRepository.isMasterEnabled(context)) return
+        val rules = MacroRepository.getMacros(context).filter {
+            it.enabled && it.triggerType == TriggerType.SHAKE_DEVICE
+        }
+        for (rule in rules) {
+            evaluateAndRun(context, rule, "스마트폰 흔들기 감지")
+        }
     }
 
     fun onScreenContentChanged(context: Context, pkg: String, screenTexts: List<String>) {
@@ -249,7 +297,7 @@ object MacroEngine {
                             )
                         )
                     }
-                    delay(120L)
+                    delay(humanizeInterval(context, 120L))
                 }
             } catch (_: CancellationException) {
             } catch (e: Exception) {
@@ -265,6 +313,12 @@ object MacroEngine {
                 isExecuting = false
             }
         }
+    }
+
+    private fun humanizeInterval(context: Context, baseMs: Long): Long {
+        if (!MacroRepository.isHumanizerEnabled(context)) return baseMs
+        val factor = Random.nextDouble(0.88, 1.14)
+        return (baseMs * factor).toLong().coerceAtLeast(35L)
     }
 
     private fun checkConstraint(context: Context, rule: MacroRule): Boolean {
@@ -324,7 +378,7 @@ object MacroEngine {
                     val ok = svc.performTap(step.x, step.y, step.durationMs)
                     if (!ok) allOk = false
                     if (i < count - 1) {
-                        delay(step.repeatIntervalMs.coerceAtLeast(40L))
+                        delay(humanizeInterval(context, step.repeatIntervalMs.coerceAtLeast(40L)))
                     }
                 }
                 allOk
@@ -332,6 +386,44 @@ object MacroEngine {
             ActionType.LONG_PRESS_XY -> {
                 val svc = ARangerAccessibilityService.instance ?: return false
                 svc.performTap(step.x, step.y, step.durationMs.coerceAtLeast(600L))
+            }
+            ActionType.TAP_IF_COLOR -> {
+                val svc = ARangerAccessibilityService.instance ?: return false
+                val currentHex = svc.samplePixelColor(step.x, step.y) ?: return false
+                if (ARangerAccessibilityService.colorsMatch(currentHex, step.colorHex)) {
+                    svc.performTap(step.x, step.y, step.durationMs)
+                } else {
+                    false
+                }
+            }
+            ActionType.LOOP_UNTIL_COLOR -> {
+                val svc = ARangerAccessibilityService.instance ?: return false
+                val maxTries = step.repeatCount.coerceIn(1, 500)
+                val interval = step.repeatIntervalMs.coerceAtLeast(250L)
+                for (i in 0 until maxTries) {
+                    val sampled = svc.samplePixelColor(step.x, step.y)
+                    if (sampled != null && ARangerAccessibilityService.colorsMatch(sampled, step.colorHex)) {
+                        return svc.performTap(step.x, step.y, step.durationMs)
+                    }
+                    delay(humanizeInterval(context, interval))
+                }
+                false
+            }
+            ActionType.CUSTOM_GESTURE_PATH -> {
+                val svc = ARangerAccessibilityService.instance ?: return false
+                val pathData = step.gesturePathJson.ifBlank {
+                    MacroRepository.getLastRecordedPathJson(context)
+                }
+                val count = step.repeatCount.coerceIn(1, 200)
+                var allOk = true
+                for (i in 0 until count) {
+                    val ok = svc.performCustomPath(pathData, step.durationMs)
+                    if (!ok) allOk = false
+                    if (i < count - 1) {
+                        delay(humanizeInterval(context, step.repeatIntervalMs.coerceAtLeast(200L)))
+                    }
+                }
+                allOk
             }
             ActionType.CLICK_TEXT -> {
                 val svc = ARangerAccessibilityService.instance ?: return false
@@ -351,7 +443,7 @@ object MacroEngine {
                         return true
                     }
                     svc.performTap(step.x, step.y, step.durationMs)
-                    delay(interval)
+                    delay(humanizeInterval(context, interval))
                 }
                 targetText.isEmpty() || svc.containsScreenText(targetText)
             }
@@ -363,18 +455,23 @@ object MacroEngine {
                     val ok = svc.performSwipe(step.x, step.y, step.x2, step.y2, step.durationMs)
                     if (!ok) allOk = false
                     if (i < count - 1) {
-                        delay(step.repeatIntervalMs.coerceAtLeast(150L))
+                        delay(humanizeInterval(context, step.repeatIntervalMs.coerceAtLeast(150L)))
                     }
                 }
                 allOk
             }
             ActionType.INPUT_TEXT -> {
                 val svc = ARangerAccessibilityService.instance ?: return false
-                svc.inputText(step.textParam)
+                val expanded = expandTemplateVars(step.textParam)
+                svc.inputText(expanded)
             }
             ActionType.CLIPBOARD_PASTE -> {
                 val svc = ARangerAccessibilityService.instance ?: return false
-                svc.pasteTextViaClipboard(step.textParam)
+                val expanded = expandTemplateVars(step.textParam)
+                svc.pasteTextViaClipboard(expanded)
+            }
+            ActionType.WEBHOOK_HTTP -> {
+                sendWebhookRequest(context, step.textParam)
             }
             ActionType.WAIT -> {
                 delay(step.durationMs.coerceIn(50L, 300_000L))
@@ -393,13 +490,63 @@ object MacroEngine {
                 launchAppByKeyword(context, step.textParam)
             }
             ActionType.TOAST_VIBRATE -> {
-                val msg = step.textParam.ifBlank { "A-ranger 매크로 실행됨" }
+                val msg = expandTemplateVars(step.textParam.ifBlank { "A-ranger 매크로 실행됨" })
                 showToast(context, msg)
                 vibrateShort(context)
                 true
             }
         }
     }
+
+    private fun expandTemplateVars(raw: String): String {
+        val nowStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.KOREA).format(Date())
+        return raw
+            .replace("{noti}", MacroRepository.lastNotificationText)
+            .replace("{pkg}", MacroRepository.currentForegroundPackage)
+            .replace("{time}", nowStr)
+    }
+
+    private suspend fun sendWebhookRequest(context: Context, spec: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val rawUrl = spec.trim()
+                if (rawUrl.isEmpty()) return@withContext false
+                val nowStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.KOREA).format(Date())
+                val resolvedUrl = rawUrl
+                    .replace("{noti}", URLEncoder.encode(MacroRepository.lastNotificationText, "UTF-8"))
+                    .replace("{pkg}", URLEncoder.encode(MacroRepository.currentForegroundPackage, "UTF-8"))
+                    .replace("{time}", URLEncoder.encode(nowStr, "UTF-8"))
+
+                val conn = (URL(resolvedUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 7000
+                    readTimeout = 7000
+                    setRequestProperty("User-Agent", "A-ranger-Pro/1.3.0")
+                }
+                val code = conn.responseCode
+                conn.disconnect()
+                val ok = code in 200..299
+                MacroRepository.addLog(
+                    context,
+                    LogEntry(
+                        macroName = "🌐 웹훅 전송",
+                        message = "HTTP $code → ${resolvedUrl.take(80)}",
+                        isSuccess = ok
+                    )
+                )
+                ok
+            } catch (e: Exception) {
+                MacroRepository.addLog(
+                    context,
+                    LogEntry(
+                        macroName = "🌐 웹훅 오류",
+                        message = e.message ?: "연결 실패",
+                        isSuccess = false
+                    )
+                )
+                false
+            }
+        }
 
     private fun setMediaVolumePercent(context: Context, percent: Int) {
         try {

@@ -48,7 +48,7 @@ object MacroEditorDialog {
 
         // 1. 매크로 이름
         container.addView(sectionLabel(context, "📌 매크로 이름"))
-        val nameInput = styledEditText(context, "예: 광고 건너뛰기 / 연속 터치").apply {
+        val nameInput = styledEditText(context, "예: 광고 건너뛰기 / 색상 감지 터치").apply {
             setText(initialRule?.name ?: "")
         }
         container.addView(nameInput)
@@ -66,14 +66,41 @@ object MacroEditorDialog {
         }
         container.addView(triggerParamInput)
 
+        val loadPixelTriggerBtn = TextView(context).apply {
+            val pt = MacroRepository.getPickedPoint(context)
+            val hex = MacroRepository.getPickedColorHex(context)
+            text = "🎨 스포이드 추출값 (${pt.first},${pt.second},$hex) 자동 입력"
+            setTextColor(Color.parseColor("#38BDF8"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8))
+            visibility = View.GONE
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(context, 8).toFloat()
+                setColor(Color.parseColor("#1E293B"))
+                setStroke(dp(context, 1), Color.parseColor("#38BDF8"))
+            }
+            setOnClickListener {
+                val p = MacroRepository.getPickedPoint(context)
+                val c = MacroRepository.getPickedColorHex(context)
+                triggerParamInput.setText("${p.first},${p.second},$c")
+            }
+        }
+        container.addView(loadPixelTriggerBtn)
+
         triggerSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val selected = triggerTypes[position]
                 triggerParamInput.hint = selected.hint
                 triggerParamInput.visibility = when (selected) {
-                    TriggerType.MANUAL_FLOATING, TriggerType.CHARGING_CONNECTED -> View.GONE
+                    TriggerType.MANUAL_FLOATING,
+                    TriggerType.CHARGING_CONNECTED,
+                    TriggerType.SHAKE_DEVICE -> View.GONE
                     else -> View.VISIBLE
                 }
+                loadPixelTriggerBtn.visibility =
+                    if (selected == TriggerType.PIXEL_COLOR_MATCH) View.VISIBLE else View.GONE
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
@@ -127,7 +154,7 @@ object MacroEditorDialog {
             actionsContainer.removeAllViews()
             if (workingActions.isEmpty()) {
                 val emptyTv = TextView(context).apply {
-                    text = "아직 등록된 액션이 없습니다. 아래 [+ 액션 추가] 버튼을 눌러 화면 터치, 글자/ID 클릭, 조건 루프 등을 추가하세요."
+                    text = "아직 등록된 액션이 없습니다. 아래 [+ 액션 추가] 버튼을 눌러 화면 터치, 픽셀 색상 조건, 궤적 재생, 웹훅 등을 추가하세요."
                     setTextColor(Color.parseColor("#94A3B8"))
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
                     setPadding(dp(context, 8), dp(context, 10), dp(context, 8), dp(context, 10))
@@ -269,6 +296,7 @@ object MacroEditorDialog {
 
         val picked = MacroRepository.getPickedPoint(context)
         val pickedNode = MacroRepository.getPickedNodeInfo(context)
+        val pickedColor = MacroRepository.getPickedColorHex(context)
 
         val xInput = styledEditText(context, "X 좌표 (예: 540)", InputType.TYPE_CLASS_NUMBER).apply {
             setText(picked.first.toString())
@@ -282,6 +310,9 @@ object MacroEditorDialog {
         val y2Input = styledEditText(context, "끝 Y2 좌표 (예: 450)", InputType.TYPE_CLASS_NUMBER).apply {
             setText("450")
         }
+        val colorHexInput = styledEditText(context, "비교할 색상 #RRGGBB (예: #38BDF8)").apply {
+            setText(pickedColor)
+        }
         val durationInput = styledEditText(context, "지속/대기 시간 ms (예: 100)", InputType.TYPE_CLASS_NUMBER).apply {
             setText("100")
         }
@@ -291,14 +322,15 @@ object MacroEditorDialog {
         val repeatIntervalInput = styledEditText(context, "반복 간격 ms (기본 250)", InputType.TYPE_CLASS_NUMBER).apply {
             setText("250")
         }
-        val textParamInput = styledEditText(context, "찾을 글자 / 뷰 ID / 텍스트 입력")
+        val textParamInput = styledEditText(context, "찾을 글자 / 뷰 ID / 텍스트 / URL 입력")
 
         val globalOptions = GlobalActionOption.entries
         val globalSpinner = styledSpinner(context, globalOptions.map { it.label })
 
         fun buildLoadCoordButton(): View = TextView(context).apply {
             val pt = MacroRepository.getPickedPoint(context)
-            text = "📌 조준기/분석기 저장 좌표 (${pt.first}, ${pt.second}) 불러오기"
+            val hex = MacroRepository.getPickedColorHex(context)
+            text = "📌 조준기/스포이드 저장값 (${pt.first}, ${pt.second} · $hex) 불러오기"
             setTextColor(Color.parseColor("#38BDF8"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
             setTypeface(typeface, Typeface.BOLD)
@@ -311,9 +343,15 @@ object MacroEditorDialog {
             }
             setOnClickListener {
                 val latest = MacroRepository.getPickedPoint(context)
+                val latestHex = MacroRepository.getPickedColorHex(context)
                 xInput.setText(latest.first.toString())
                 yInput.setText(latest.second.toString())
-                Toast.makeText(context, "좌표 (${latest.first}, ${latest.second}) 적용됨", Toast.LENGTH_SHORT).show()
+                colorHexInput.setText(latestHex)
+                Toast.makeText(
+                    context,
+                    "좌표 (${latest.first}, ${latest.second}) 및 색상 $latestHex 적용됨",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
 
@@ -340,6 +378,49 @@ object MacroEditorDialog {
                     dynamicFields.addView(sectionLabel(context, "길게 누를 시간(ms, 기본 800ms)"))
                     durationInput.setText("800")
                     dynamicFields.addView(durationInput)
+                }
+                ActionType.TAP_IF_COLOR -> {
+                    dynamicFields.addView(buildLoadCoordButton())
+                    dynamicFields.addView(sectionLabel(context, "검사 및 터치할 X / Y 좌표"))
+                    dynamicFields.addView(xInput)
+                    dynamicFields.addView(yInput)
+                    dynamicFields.addView(sectionLabel(context, "일치해야 하는 픽셀 색상 (#RRGGBB)"))
+                    dynamicFields.addView(colorHexInput)
+                    dynamicFields.addView(sectionLabel(context, "터치 유지 시간(ms)"))
+                    durationInput.setText("95")
+                    dynamicFields.addView(durationInput)
+                }
+                ActionType.LOOP_UNTIL_COLOR -> {
+                    dynamicFields.addView(buildLoadCoordButton())
+                    dynamicFields.addView(sectionLabel(context, "검사 및 터치할 X / Y 좌표"))
+                    dynamicFields.addView(xInput)
+                    dynamicFields.addView(yInput)
+                    dynamicFields.addView(sectionLabel(context, "기다릴 목표 픽셀 색상 (#RRGGBB)"))
+                    dynamicFields.addView(colorHexInput)
+                    dynamicFields.addView(sectionLabel(context, "최대 검사 횟수 및 검사 간격(ms)"))
+                    repeatCountInput.setText("25")
+                    repeatIntervalInput.setText("400")
+                    dynamicFields.addView(repeatCountInput)
+                    dynamicFields.addView(repeatIntervalInput)
+                }
+                ActionType.CUSTOM_GESTURE_PATH -> {
+                    val savedPath = MacroRepository.getLastRecordedPathJson(context)
+                    val infoTv = TextView(context).apply {
+                        text = if (savedPath.isNotBlank()) {
+                            "✅ 최근 [📹 궤적] 버튼으로 녹화한 자유 곡선·패턴이 자동으로 연결됩니다."
+                        } else {
+                            "ℹ️ 플로팅 리모컨의 [📹 궤적] 버튼을 눌러 화면에 곡선/패턴을 그리면 해당 궤적이 재생됩니다."
+                        }
+                        setTextColor(Color.parseColor("#38BDF8"))
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+                        setPadding(dp(context, 4), dp(context, 8), dp(context, 4), dp(context, 8))
+                    }
+                    dynamicFields.addView(infoTv)
+                    dynamicFields.addView(sectionLabel(context, "재생 시간(ms) 및 반복 횟수"))
+                    durationInput.setText("650")
+                    repeatCountInput.setText("1")
+                    dynamicFields.addView(durationInput)
+                    dynamicFields.addView(repeatCountInput)
                 }
                 ActionType.CLICK_TEXT -> {
                     dynamicFields.addView(sectionLabel(context, "화면에서 찾아 클릭할 글자(버튼 텍스트)"))
@@ -410,13 +491,18 @@ object MacroEditorDialog {
                     dynamicFields.addView(repeatCountInput)
                 }
                 ActionType.INPUT_TEXT -> {
-                    dynamicFields.addView(sectionLabel(context, "입력창에 자동으로 타이핑할 내용"))
-                    textParamInput.hint = "예: 안녕하세요 / 검색어 입력"
+                    dynamicFields.addView(sectionLabel(context, "입력창에 자동으로 타이핑할 내용 ({noti}, {time} 변수 지원)"))
+                    textParamInput.hint = "예: 안녕하세요 / {noti}"
                     dynamicFields.addView(textParamInput)
                 }
                 ActionType.CLIPBOARD_PASTE -> {
-                    dynamicFields.addView(sectionLabel(context, "클립보드에 복사 후 즉시 붙여넣을 텍스트"))
+                    dynamicFields.addView(sectionLabel(context, "클립보드에 복사 후 즉시 붙여넣을 텍스트 ({noti}, {time} 지원)"))
                     textParamInput.hint = "일반 타이핑이 막힌 입력창에도 빠르게 붙여넣습니다"
+                    dynamicFields.addView(textParamInput)
+                }
+                ActionType.WEBHOOK_HTTP -> {
+                    dynamicFields.addView(sectionLabel(context, "호출할 웹훅 URL ({noti}=최근알림, {pkg}=현재앱, {time}=시각)"))
+                    textParamInput.hint = "예: https://example.com/hook?msg={noti}&app={pkg}"
                     dynamicFields.addView(textParamInput)
                 }
                 ActionType.WAIT -> {
@@ -470,7 +556,13 @@ object MacroEditorDialog {
                     repeatCount = (repeatCountInput.text.toString().toIntOrNull() ?: 1).coerceAtLeast(1),
                     repeatIntervalMs = (repeatIntervalInput.text.toString().toLongOrNull() ?: 250L).coerceAtLeast(40L),
                     textParam = textParamInput.text.toString().trim(),
-                    globalActionName = globalOptions[globalSpinner.selectedItemPosition].name
+                    globalActionName = globalOptions[globalSpinner.selectedItemPosition].name,
+                    colorHex = colorHexInput.text.toString().trim().ifBlank { "#38BDF8" },
+                    gesturePathJson = if (type == ActionType.CUSTOM_GESTURE_PATH) {
+                        MacroRepository.getLastRecordedPathJson(context)
+                    } else {
+                        ""
+                    }
                 )
                 onAdded(step)
             }

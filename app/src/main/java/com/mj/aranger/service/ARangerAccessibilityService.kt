@@ -5,9 +5,18 @@ import android.accessibilityservice.GestureDescription
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Path
 import android.graphics.Rect
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Build
 import android.os.Bundle
+import android.view.Display
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.mj.aranger.engine.MacroEngine
@@ -19,9 +28,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import org.json.JSONObject
 import kotlin.coroutines.resume
+import kotlin.math.abs
+import kotlin.math.sqrt
+import kotlin.random.Random
 
-class ARangerAccessibilityService : AccessibilityService() {
+class ARangerAccessibilityService : AccessibilityService(), SensorEventListener {
 
     companion object {
         @Volatile
@@ -29,11 +42,30 @@ class ARangerAccessibilityService : AccessibilityService() {
             private set
 
         fun isRunning(): Boolean = instance != null
+
+        fun colorsMatch(hexA: String, hexB: String, tolerance: Int = 36): Boolean {
+            return try {
+                val c1 = Color.parseColor(if (hexA.startsWith("#")) hexA else "#$hexA")
+                val c2 = Color.parseColor(if (hexB.startsWith("#")) hexB else "#$hexB")
+                val dr = abs(Color.red(c1) - Color.red(c2))
+                val dg = abs(Color.green(c1) - Color.green(c2))
+                val db = abs(Color.blue(c1) - Color.blue(c2))
+                dr <= tolerance && dg <= tolerance && db <= tolerance
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var lastContentCheckTime = 0L
     private var lastAutoGuardTime = 0L
+
+    private var sensorManager: SensorManager? = null
+    private var accelCurrent = SensorManager.GRAVITY_EARTH
+    private var accelLast = SensorManager.GRAVITY_EARTH
+    private var shakeDelta = 0f
+    private var lastShakeTime = 0L
 
     private val systemDialogPackages = setOf(
         "com.android.systemui",
@@ -47,15 +79,68 @@ class ARangerAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        registerShakeSensor()
         MacroRepository.addLog(
             this,
             LogEntry(
                 macroName = "접근성 서비스",
-                message = "A-ranger 화면 제어 엔진(v1.1)이 연결되었습니다.",
+                message = "A-ranger Pro 화면 제어 엔진(v1.3)이 연결되었습니다.",
                 isSuccess = true
             )
         )
         MacroEngine.startTimerLoop(applicationContext)
+    }
+
+    private fun registerShakeSensor() {
+        try {
+            val sm = getSystemService(Context.SENSOR_SERVICE) as? SensorManager ?: return
+            sensorManager = sm
+            val accel = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            if (accel != null) {
+                sm.registerListener(this, accel, SensorManager.SENSOR_DELAY_UI)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event?.sensor?.type != Sensor.TYPE_ACCELEROMETER) return
+        val x = event.values[0]
+        val y = event.values[1]
+        val z = event.values[2]
+        accelLast = accelCurrent
+        accelCurrent = sqrt(x * x + y * y + z * z)
+        val delta = accelCurrent - accelLast
+        shakeDelta = shakeDelta * 0.85f + delta
+
+        val now = System.currentTimeMillis()
+        if (shakeDelta > 15.0f && now - lastShakeTime > 1200L) {
+            lastShakeTime = now
+            if (MacroEngine.isExecuting && MacroRepository.isVolumePanicEnabled(applicationContext)) {
+                MacroEngine.stopAllExecutions(applicationContext, "📳 스마트폰 흔들기 긴급 정지")
+            } else {
+                MacroEngine.onDeviceShaken(applicationContext)
+            }
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+    }
+
+    /**
+     * 🔊 하드웨어 볼륨[↓] 버튼 긴급 정지 (Panic Stop):
+     * 매크로가 실행 중일 때만 볼륨 다운 키를 가로채어 즉시 정지시키며,
+     * 매크로가 실행 중이 아닐 때는 false를 반환하여 원래의 볼륨 조절이 정상 작동합니다.
+     */
+    override fun onKeyEvent(event: KeyEvent?): Boolean {
+        event ?: return false
+        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && event.action == KeyEvent.ACTION_DOWN) {
+            if (MacroEngine.isExecuting && MacroRepository.isVolumePanicEnabled(applicationContext)) {
+                MacroEngine.stopAllExecutions(applicationContext, "🔊 볼륨[↓] 버튼 긴급 정지")
+                return true
+            }
+        }
+        return super.onKeyEvent(event)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -99,7 +184,6 @@ class ARangerAccessibilityService : AccessibilityService() {
             if (isUsbOrSystemPrompt) {
                 lastAutoGuardTime = now
                 serviceScope.launch {
-                    // '항상 허용' 체크박스가 있으면 먼저 체크
                     clickUncheckedBoxByKeyword("항상")
                     clickUncheckedBoxByKeyword("Always")
                     val clicked = clickNodeByText("허용") ||
@@ -150,6 +234,10 @@ class ARangerAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        try {
+            sensorManager?.unregisterListener(this)
+        } catch (_: Exception) {
+        }
         if (instance === this) {
             instance = null
         }
@@ -173,9 +261,6 @@ class ARangerAccessibilityService : AccessibilityService() {
         return roots
     }
 
-    /**
-     * 현재 활성 화면의 모든 텍스트 및 설명(contentDescription)을 수집합니다.
-     */
     fun collectAllScreenTexts(): List<String> {
         val result = mutableListOf<String>()
         for (root in getTargetRoots()) {
@@ -194,10 +279,6 @@ class ARangerAccessibilityService : AccessibilityService() {
         }
     }
 
-    /**
-     * 실시간 화면 UI 분석기(UI Inspector):
-     * 현재 화면에 표시된 버튼, 텍스트, View ID, 중심 좌표 목록을 추출합니다.
-     */
     fun inspectCurrentScreenNodes(): List<UiNodeItem> {
         val items = mutableListOf<UiNodeItem>()
         val seenKeys = HashSet<String>()
@@ -261,13 +342,72 @@ class ARangerAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * 지정한 (x, y) 좌표를 터치합니다.
+     * 🎨 화면 특정 (x, y) 좌표의 실제 픽셀 색상(#RRGGBB)을 추출합니다 (Android 11 / API 30+).
+     */
+    suspend fun samplePixelColor(x: Int, y: Int): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return suspendCancellableCoroutine { cont ->
+            try {
+                takeScreenshot(
+                    Display.DEFAULT_DISPLAY,
+                    mainExecutor,
+                    object : TakeScreenshotCallback {
+                        override fun onSuccess(screenshot: ScreenshotResult) {
+                            var hex: String? = null
+                            try {
+                                val hwBuffer = screenshot.hardwareBuffer
+                                val hwBitmap = Bitmap.wrapHardwareBuffer(hwBuffer, screenshot.colorSpace)
+                                if (hwBitmap != null) {
+                                    val softBitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                                    val px = x.coerceIn(0, (softBitmap.width - 1).coerceAtLeast(0))
+                                    val py = y.coerceIn(0, (softBitmap.height - 1).coerceAtLeast(0))
+                                    val colorInt = softBitmap.getPixel(px, py)
+                                    hex = String.format(
+                                        "#%02X%02X%02X",
+                                        Color.red(colorInt),
+                                        Color.green(colorInt),
+                                        Color.blue(colorInt)
+                                    )
+                                    softBitmap.recycle()
+                                    hwBitmap.recycle()
+                                }
+                                hwBuffer.close()
+                            } catch (_: Exception) {
+                            }
+                            if (cont.isActive) cont.resume(hex)
+                        }
+
+                        override fun onFailure(errorCode: Int) {
+                            if (cont.isActive) cont.resume(null)
+                        }
+                    }
+                )
+            } catch (_: Exception) {
+                if (cont.isActive) cont.resume(null)
+            }
+        }
+    }
+
+    private fun humanizeCoord(coord: Int): Int {
+        if (!MacroRepository.isHumanizerEnabled(applicationContext)) return coord
+        val jitter = Random.nextInt(-7, 8)
+        return (coord + jitter).coerceAtLeast(2)
+    }
+
+    private fun humanizeDuration(durationMs: Long): Long {
+        if (!MacroRepository.isHumanizerEnabled(applicationContext)) return durationMs
+        val factor = Random.nextDouble(0.86, 1.15)
+        return (durationMs * factor).toLong().coerceIn(25L, 8000L)
+    }
+
+    /**
+     * 지정한 (x, y) 좌표를 터치합니다 (Humanizer 활성 시 미세 랜덤 오프셋 자동 적용).
      */
     suspend fun performTap(x: Int, y: Int, durationMs: Long = 100L): Boolean =
         suspendCancellableCoroutine { cont ->
-            val safeX = x.coerceAtLeast(1).toFloat()
-            val safeY = y.coerceAtLeast(1).toFloat()
-            val safeDuration = durationMs.coerceIn(20L, 8000L)
+            val safeX = humanizeCoord(x).toFloat()
+            val safeY = humanizeCoord(y).toFloat()
+            val safeDuration = humanizeDuration(durationMs.coerceIn(20L, 8000L))
 
             val path = Path().apply { moveTo(safeX, safeY) }
             val stroke = GestureDescription.StrokeDescription(path, 0L, safeDuration)
@@ -302,10 +442,14 @@ class ARangerAccessibilityService : AccessibilityService() {
         durationMs: Long = 300L
     ): Boolean = suspendCancellableCoroutine { cont ->
         val path = Path().apply {
-            moveTo(x1.coerceAtLeast(1).toFloat(), y1.coerceAtLeast(1).toFloat())
-            lineTo(x2.coerceAtLeast(1).toFloat(), y2.coerceAtLeast(1).toFloat())
+            moveTo(humanizeCoord(x1).toFloat(), humanizeCoord(y1).toFloat())
+            lineTo(humanizeCoord(x2).toFloat(), humanizeCoord(y2).toFloat())
         }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs.coerceIn(50L, 8000L))
+        val stroke = GestureDescription.StrokeDescription(
+            path,
+            0L,
+            humanizeDuration(durationMs.coerceIn(50L, 8000L))
+        )
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
 
         val dispatched = dispatchGesture(
@@ -326,6 +470,57 @@ class ARangerAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * 📹 사용자가 화면에 직접 그려 녹화한 자유 곡선·패턴 제스처 경로(JSON)를 그대로 재현합니다.
+     */
+    suspend fun performCustomPath(pathJson: String, fallbackDurationMs: Long = 600L): Boolean =
+        suspendCancellableCoroutine { cont ->
+            try {
+                if (pathJson.isBlank()) {
+                    if (cont.isActive) cont.resume(false)
+                    return@suspendCancellableCoroutine
+                }
+                val obj = JSONObject(pathJson)
+                val ptsArr = obj.optJSONArray("points")
+                if (ptsArr == null || ptsArr.length() == 0) {
+                    if (cont.isActive) cont.resume(false)
+                    return@suspendCancellableCoroutine
+                }
+                val recordedDur = obj.optLong("durationMs", fallbackDurationMs).coerceIn(60L, 12000L)
+                val path = Path()
+                for (i in 0 until ptsArr.length()) {
+                    val pair = ptsArr.optJSONArray(i) ?: continue
+                    val px = pair.optInt(0, 540).coerceAtLeast(1).toFloat()
+                    val py = pair.optInt(1, 1200).coerceAtLeast(1).toFloat()
+                    if (i == 0) {
+                        path.moveTo(px, py)
+                    } else {
+                        path.lineTo(px, py)
+                    }
+                }
+                val stroke = GestureDescription.StrokeDescription(path, 0L, humanizeDuration(recordedDur))
+                val gesture = GestureDescription.Builder().addStroke(stroke).build()
+                val dispatched = dispatchGesture(
+                    gesture,
+                    object : GestureResultCallback() {
+                        override fun onCompleted(gestureDescription: GestureDescription?) {
+                            if (cont.isActive) cont.resume(true)
+                        }
+
+                        override fun onCancelled(gestureDescription: GestureDescription?) {
+                            if (cont.isActive) cont.resume(false)
+                        }
+                    },
+                    null
+                )
+                if (!dispatched && cont.isActive) {
+                    cont.resume(false)
+                }
+            } catch (_: Exception) {
+                if (cont.isActive) cont.resume(false)
+            }
+        }
+
     private fun clickUncheckedBoxByKeyword(keyword: String) {
         for (root in getTargetRoots()) {
             val node = findMatchingNode(root, keyword, 0) ?: continue
@@ -336,9 +531,6 @@ class ARangerAccessibilityService : AccessibilityService() {
         }
     }
 
-    /**
-     * 화면에서 targetText가 포함된 UI 요소를 찾아 클릭합니다.
-     */
     suspend fun clickNodeByText(targetText: String): Boolean {
         val query = targetText.trim()
         if (query.isEmpty()) return false
@@ -352,9 +544,6 @@ class ARangerAccessibilityService : AccessibilityService() {
         return clickOrTapNode(target)
     }
 
-    /**
-     * 화면에서 View ID(Resource ID)가 일치하거나 포함된 UI 요소를 찾아 클릭합니다.
-     */
     suspend fun clickNodeByViewId(viewIdQuery: String): Boolean {
         val query = viewIdQuery.trim()
         if (query.isEmpty()) return false
@@ -425,9 +614,6 @@ class ARangerAccessibilityService : AccessibilityService() {
         return null
     }
 
-    /**
-     * 현재 포커스된 입력창 또는 화면 내 첫 번째 입력 가능한 노드에 텍스트를 입력합니다.
-     */
     fun inputText(text: String): Boolean {
         for (root in getTargetRoots()) {
             val targetNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
@@ -443,9 +629,6 @@ class ARangerAccessibilityService : AccessibilityService() {
         return false
     }
 
-    /**
-     * 텍스트를 클립보드에 복사한 뒤 현재 입력창에 붙여넣기(ACTION_PASTE)합니다.
-     */
     fun pasteTextViaClipboard(text: String): Boolean {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("A-ranger", text))

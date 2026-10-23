@@ -11,6 +11,8 @@ import java.util.UUID
 enum class TriggerType(val title: String, val hint: String) {
     MANUAL_FLOATING("🎮 플로팅 리모컨 버튼 클릭", "화면 위 리모컨에서 [▶ 실행]을 누를 때 작동"),
     SCREEN_TEXT_FOUND("🔍 화면에 특정 글자 등장", "감지할 화면 텍스트 (예: 건너뛰기, 확인, 허용)"),
+    PIXEL_COLOR_MATCH("🎨 화면 특정 좌표 픽셀 색상 일치 시", "X,Y,#RRGGBB 형식 입력 (예: 540,1200,#38BDF8)"),
+    SHAKE_DEVICE("📳 스마트폰 흔들기 감지", "스마트폰을 강하게 흔들었을 때 즉시 작동"),
     APP_OPENED("📱 특정 앱 실행 시", "앱 이름 또는 패키지명 (예: youtube, kakao)"),
     NOTIFICATION_RECEIVED("🔔 알림 수신 시", "알림에 포함될 키워드 (비워두면 모든 알림)"),
     INTERVAL_TIMER("⏱️ 주기적 반복 타이머", "반복 주기(초) 입력 (예: 5, 10, 60)"),
@@ -41,12 +43,16 @@ enum class ConstraintType(val title: String, val hint: String) {
 enum class ActionType(val title: String) {
     TAP_XY("👆 좌표 터치 / 연속 광클 (X, Y)"),
     LONG_PRESS_XY("👇 좌표 길게 누르기 (Long Press)"),
+    TAP_IF_COLOR("🎨 좌표 픽셀 색상이 일치할 때만 터치"),
+    LOOP_UNTIL_COLOR("🎨 좌표 픽셀 색상이 뜰 때까지 대기·터치"),
+    CUSTOM_GESTURE_PATH("📹 녹화한 자유 곡선·패턴 제스처 재생"),
     CLICK_TEXT("🎯 화면 글자·버튼 찾아 클릭"),
     CLICK_VIEW_ID("🧩 뷰 ID(Resource ID) 찾아 클릭"),
     LOOP_UNTIL_TEXT("🔁 특정 글자 뜰 때까지 좌표 반복 터치"),
     SWIPE("👋 화면 스와이프 / 스크롤"),
     INPUT_TEXT("⌨️ 입력창에 텍스트 자동 입력"),
     CLIPBOARD_PASTE("📋 클립보드 복사 & 즉시 붙여넣기"),
+    WEBHOOK_HTTP("🌐 웹훅(HTTP URL) 요청 전송"),
     WAIT("⏳ 대기 / 딜레이 (밀리초)"),
     GLOBAL_ACTION("🔘 시스템 버튼 (뒤로/홈/잠금/캡처)"),
     MEDIA_VOLUME("🔊 미디어 볼륨 조절 (0~100%)"),
@@ -107,7 +113,9 @@ data class ActionStep(
     val repeatCount: Int = 1,
     val repeatIntervalMs: Long = 250L,
     val textParam: String = "",
-    val globalActionName: String = GlobalActionOption.BACK.name
+    val globalActionName: String = GlobalActionOption.BACK.name,
+    val colorHex: String = "#38BDF8",
+    val gesturePathJson: String = ""
 ) {
     fun toSummary(): String = when (type) {
         ActionType.TAP_XY -> {
@@ -118,12 +126,16 @@ data class ActionStep(
             }
         }
         ActionType.LONG_PRESS_XY -> "👇 좌표 ($x, $y) 길게 누르기 (${durationMs.coerceAtLeast(500L)}ms)"
+        ActionType.TAP_IF_COLOR -> "🎨 ($x, $y) 색상이 $colorHex 일 때만 터치"
+        ActionType.LOOP_UNTIL_COLOR -> "🎨 ($x, $y) 색상이 $colorHex 될 때까지 대기·터치 (최대 ${repeatCount}회)"
+        ActionType.CUSTOM_GESTURE_PATH -> "📹 자유 궤적·패턴 제스처 재생 (${durationMs}ms, ${repeatCount}회)"
         ActionType.CLICK_TEXT -> "🎯 화면 글자 「$textParam」 찾아 클릭"
         ActionType.CLICK_VIEW_ID -> "🧩 뷰 ID 「$textParam」 찾아 클릭"
         ActionType.LOOP_UNTIL_TEXT -> "🔁 「$textParam」 뜰 때까지 ($x, $y) 반복 터치 (최대 ${repeatCount}회)"
         ActionType.SWIPE -> "👋 스와이프 ($x, $y) → ($x2, $y2) (${durationMs}ms, ${repeatCount}회)"
         ActionType.INPUT_TEXT -> "⌨️ 텍스트 입력: 「$textParam」"
         ActionType.CLIPBOARD_PASTE -> "📋 클립보드 복사 & 붙여넣기: 「$textParam」"
+        ActionType.WEBHOOK_HTTP -> "🌐 웹훅 전송: $textParam"
         ActionType.WAIT -> "⏳ ${durationMs}ms 대기"
         ActionType.GLOBAL_ACTION -> "🔘 시스템: ${GlobalActionOption.fromName(globalActionName).label}"
         ActionType.MEDIA_VOLUME -> "🔊 미디어 볼륨 ${x.coerceIn(0, 100)}%로 설정"
@@ -143,6 +155,8 @@ data class ActionStep(
         put("repeatIntervalMs", repeatIntervalMs)
         put("textParam", textParam)
         put("globalActionName", globalActionName)
+        put("colorHex", colorHex)
+        put("gesturePathJson", gesturePathJson)
     }
 
     companion object {
@@ -157,7 +171,9 @@ data class ActionStep(
             repeatCount = obj.optInt("repeatCount", 1).coerceAtLeast(1),
             repeatIntervalMs = obj.optLong("repeatIntervalMs", 250L).coerceAtLeast(40L),
             textParam = obj.optString("textParam", ""),
-            globalActionName = obj.optString("globalActionName", GlobalActionOption.BACK.name)
+            globalActionName = obj.optString("globalActionName", GlobalActionOption.BACK.name),
+            colorHex = obj.optString("colorHex", "#38BDF8").ifBlank { "#38BDF8" },
+            gesturePathJson = obj.optString("gesturePathJson", "")
         )
     }
 }
@@ -178,6 +194,8 @@ data class MacroRule(
     fun triggerSummary(): String = when (triggerType) {
         TriggerType.MANUAL_FLOATING -> "⚡ 트리거: 플로팅 리모컨 [▶ 실행] 버튼"
         TriggerType.SCREEN_TEXT_FOUND -> "⚡ 트리거: 화면에 「$triggerParam」 등장 시"
+        TriggerType.PIXEL_COLOR_MATCH -> "⚡ 트리거: 픽셀 색상 일치 ($triggerParam)"
+        TriggerType.SHAKE_DEVICE -> "⚡ 트리거: 스마트폰 흔들기 감지"
         TriggerType.APP_OPENED -> "⚡ 트리거: 앱 「$triggerParam」 실행 시"
         TriggerType.NOTIFICATION_RECEIVED -> {
             if (triggerParam.isBlank()) "⚡ 트리거: 모든 알림 수신 시"

@@ -2,19 +2,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 자동 업데이트 서버(inanimals-1977.web.app / GitHub) 통신 및 APK 설치 권한 -->
+    <!-- 자동 업데이트 서버(inanimals-1977.web.app / GitHub) 및 웹훅 통신, APK 설치 권한 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- 화면 위 리모컨(오버레이) 및 좌표 조준경 표시 권한 -->
+    <!-- 화면 위 리모컨(오버레이) 및 좌표/색상 조준경 표시 권한 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- 백그라운드 생존용 포그라운드 서비스 권한 -->
+    <!-- 백그라운드 생존용 포그라운드 서비스 및 배터리 최적화 제외 권한 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 진동 피드백 및 액션 -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- ADB 부여 시 접근성 서비스 자가 치유(Self-Healing)를 위한 시스템 보안 설정 권한 -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
     <!-- 설치된 앱 패키지 목록 조회 및 실행 -->
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
@@ -26,7 +32,8 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ARanger">
+        android:theme="@style/Theme.ARanger"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".ui.MainActivity"
@@ -39,7 +46,7 @@
             </intent-filter>
         </activity>
 
-        <!-- 1. 핵심 화면 제어 및 UI 이벤트 감지 접근성 서비스 -->
+        <!-- 1. 핵심 화면 제어, 픽셀 색상 스포이드, 물리 볼륨키 패닉 정지 및 UI 이벤트 감지 서비스 -->
         <service
             android:name=".service.ARangerAccessibilityService"
             android:exported="false"
@@ -64,7 +71,7 @@
             </intent-filter>
         </service>
 
-        <!-- 3. 플로팅 리모컨 & 좌표 조준경 오버레이 서비스 -->
+        <!-- 3. 플로팅 리모컨 & 좌표/색상 조준경 & 궤적 레코더 오버레이 서비스 -->
         <service
             android:name=".service.FloatingOverlayService"
             android:exported="false"
@@ -86,7 +93,18 @@
             </intent-filter>
         </service>
 
-        <!-- 5. 앱 내부 자동 업데이트 APK 설치용 FileProvider -->
+        <!-- 5. 부팅 및 앱 업데이트 후 자가 치유(Self-Healing) 워치독 리시버 -->
+        <receiver
+            android:name=".service.BootAndUpdateReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 6. 앱 내부 자동 업데이트 APK 설치용 FileProvider -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

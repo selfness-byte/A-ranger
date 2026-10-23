@@ -9,7 +9,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -22,6 +25,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -34,6 +38,13 @@ import com.mj.aranger.model.MacroRule
 import com.mj.aranger.model.TriggerType
 import com.mj.aranger.store.MacroRepository
 import com.mj.aranger.ui.MainActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.math.abs
 
 class FloatingOverlayService : Service() {
@@ -64,13 +75,16 @@ class FloatingOverlayService : Service() {
         }
     }
 
+    private val overlayScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var windowManager: WindowManager
     private var panelView: View? = null
     private var panelParams: WindowManager.LayoutParams? = null
     private var crosshairView: View? = null
     private var inspectorView: View? = null
+    private var pathRecorderView: View? = null
     private var subRecorderRow: LinearLayout? = null
     private var coordLabel: TextView? = null
+    private var colorDotView: View? = null
     private var crosshairVisible = false
 
     private val recordedPoints = mutableListOf<Pair<Int, Int>>()
@@ -96,6 +110,7 @@ class FloatingOverlayService : Service() {
         clearPinMarkers()
         removeCrosshair()
         removeInspectorModal()
+        removePathRecorderOverlay()
         panelView?.let {
             try {
                 windowManager.removeView(it)
@@ -159,7 +174,7 @@ class FloatingOverlayService : Service() {
         }
 
         val notification = builder
-            .setContentTitle("A-ranger Pro 화면 제어 리모컨 실행 중")
+            .setContentTitle("A-ranger Pro v1.3 화면 제어 리모컨 실행 중")
             .setContentText("터치하여 A-ranger 대시보드 열기")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(pendingIntent)
@@ -174,6 +189,14 @@ class FloatingOverlayService : Service() {
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun updateHeaderInfo(x: Int, y: Int, colorHex: String) {
+        coordLabel?.text = "⚡ A-ranger Pro  ($x, $y)  🎨$colorHex"
+        try {
+            (colorDotView?.background as? GradientDrawable)?.setColor(Color.parseColor(colorHex))
+        } catch (_: Exception) {
         }
     }
 
@@ -196,7 +219,7 @@ class FloatingOverlayService : Service() {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = 20
-            y = 240
+            y = 230
         }
         panelParams = params
 
@@ -212,17 +235,37 @@ class FloatingOverlayService : Service() {
         }
 
         val picked = MacroRepository.getPickedPoint(this)
-        val header = TextView(this).apply {
-            text = "⚡ A-ranger Pro  (${picked.first}, ${picked.second})"
-            setTextColor(Color.parseColor("#38BDF8"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
-            setTypeface(typeface, Typeface.BOLD)
+        val pickedColor = MacroRepository.getPickedColorHex(this)
+
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), dp(2), dp(4), dp(6))
         }
-        coordLabel = header
-        root.addView(header)
+        val swatch = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(12), dp(12)).apply {
+                marginEnd = dp(6)
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                runCatching { setColor(Color.parseColor(pickedColor)) }
+                setStroke(dp(1), Color.WHITE)
+            }
+        }
+        colorDotView = swatch
+        headerRow.addView(swatch)
 
-        // 메인 버튼 행: [▶ 실행] [⏹ 정지] [🎯 조준] [🔍 분석] [✕]
+        val header = TextView(this).apply {
+            text = "⚡ A-ranger Pro  (${picked.first}, ${picked.second})  🎨$pickedColor"
+            setTextColor(Color.parseColor("#38BDF8"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setTypeface(typeface, Typeface.BOLD)
+        }
+        coordLabel = header
+        headerRow.addView(header)
+        root.addView(headerRow)
+
+        // 메인 버튼 행: [▶ 실행] [⏹ 정지] [🎯 조준] [📹 궤적] [🔍 분석] [✕]
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -237,6 +280,9 @@ class FloatingOverlayService : Service() {
         val btnTarget = createChipButton("🎯 조준", "#D97706") {
             toggleCrosshair()
         }
+        val btnPathRec = createChipButton("📹 궤적", "#E11D48") {
+            showTouchPathRecorderOverlay()
+        }
         val btnInspect = createChipButton("🔍 분석", "#7C3AED") {
             showUiInspectorOverlay()
         }
@@ -245,37 +291,49 @@ class FloatingOverlayService : Service() {
         }
 
         buttonRow.addView(btnRun)
-        buttonRow.addView(spaceView(5))
+        buttonRow.addView(spaceView(4))
         buttonRow.addView(btnStop)
-        buttonRow.addView(spaceView(5))
+        buttonRow.addView(spaceView(4))
         buttonRow.addView(btnTarget)
-        buttonRow.addView(spaceView(5))
+        buttonRow.addView(spaceView(4))
+        buttonRow.addView(btnPathRec)
+        buttonRow.addView(spaceView(4))
         buttonRow.addView(btnInspect)
-        buttonRow.addView(spaceView(5))
+        buttonRow.addView(spaceView(4))
         buttonRow.addView(btnClose)
         root.addView(buttonRow)
 
-        // 서브 레코더 행 (조준기가 켜졌을 때만 표시: [➕ 핀추가] [💾 연속매크로생성] [지우기])
+        // 서브 레코더 행 (조준기가 켜졌을 때만 표시: [🎨 스포이드] [🎨 색상매크로] [➕ 핀추가] [💾 핀매크로] [초기화])
         val recorderRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             visibility = View.GONE
             setPadding(0, dp(6), 0, 0)
         }
+        val btnEyedropper = createChipButton("🎨 스포이드", "#0D9488") {
+            sampleColorAtCrosshair(showToastResult = true)
+        }
+        val btnColorMacro = createChipButton("🎨 색상매크로", "#9333EA") {
+            createColorConditionalMacro()
+        }
         val btnAddPin = createChipButton("➕ 핀추가", "#0284C7") {
             addCurrentCrosshairPin()
         }
-        val btnSaveSeq = createChipButton("💾 연속매크로 저장", "#059669") {
+        val btnSaveSeq = createChipButton("💾 핀저장", "#059669") {
             saveRecordedSequenceAsMacro()
         }
-        val btnClearPins = createChipButton("초기화", "#475569") {
+        val btnClearPins = createChipButton("지움", "#475569") {
             clearPinMarkers()
             Toast.makeText(this, "찍어둔 핀을 모두 지웠습니다.", Toast.LENGTH_SHORT).show()
         }
+        recorderRow.addView(btnEyedropper)
+        recorderRow.addView(spaceView(4))
+        recorderRow.addView(btnColorMacro)
+        recorderRow.addView(spaceView(4))
         recorderRow.addView(btnAddPin)
-        recorderRow.addView(spaceView(5))
+        recorderRow.addView(spaceView(4))
         recorderRow.addView(btnSaveSeq)
-        recorderRow.addView(spaceView(5))
+        recorderRow.addView(spaceView(4))
         recorderRow.addView(btnClearPins)
         subRecorderRow = recorderRow
         root.addView(recorderRow)
@@ -316,13 +374,13 @@ class FloatingOverlayService : Service() {
             removeCrosshair()
             clearPinMarkers()
             subRecorderRow?.visibility = View.GONE
-            Toast.makeText(this, "좌표 조준기를 숨겼습니다.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "좌표·색상 조준기를 숨겼습니다.", Toast.LENGTH_SHORT).show()
         } else {
             showCrosshair()
             subRecorderRow?.visibility = View.VISIBLE
             Toast.makeText(
                 this,
-                "🎯 십자 타겟을 옮기면 좌표가 저장됩니다. 여러 곳을 순서대로 찍으려면 [➕ 핀추가]를 누르세요!",
+                "🎯 십자 타겟을 놓으면 좌표와 픽셀 색상(#HEX)이 자동 추출됩니다!",
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -386,7 +444,7 @@ class FloatingOverlayService : Service() {
                     v.getLocationOnScreen(loc)
                     val cx = loc[0] + v.width / 2
                     val cy = loc[1] + v.height / 2
-                    coordLabel?.text = "⚡ A-ranger Pro  ($cx, $cy)"
+                    updateHeaderInfo(cx, cy, MacroRepository.getPickedColorHex(this))
                     true
                 }
                 MotionEvent.ACTION_UP -> {
@@ -395,10 +453,9 @@ class FloatingOverlayService : Service() {
                     val cx = loc[0] + v.width / 2
                     val cy = loc[1] + v.height / 2
                     MacroRepository.savePickedPoint(this, cx, cy)
-                    coordLabel?.text = "⚡ A-ranger Pro  ($cx, $cy)"
-                    if (abs(event.rawX - downRawX) < 10 && abs(event.rawY - downRawY) < 10) {
-                        Toast.makeText(this, "📌 좌표 ($cx, $cy) 저장됨!", Toast.LENGTH_SHORT).show()
-                    }
+                    sampleColorAtCrosshair(
+                        showToastResult = abs(event.rawX - downRawX) < 10 && abs(event.rawY - downRawY) < 10
+                    )
                     true
                 }
                 else -> false
@@ -408,6 +465,235 @@ class FloatingOverlayService : Service() {
         crosshairView = target
         crosshairVisible = true
         windowManager.addView(target, params)
+    }
+
+    /**
+     * 🎨 조준기 중심의 실제 화면 픽셀 색상(#RRGGBB)을 추출합니다.
+     * 십자선 자체의 색상이 찍히지 않도록 80ms 동안 십자선을 투명하게 숨긴 후 캡처합니다.
+     */
+    private fun sampleColorAtCrosshair(showToastResult: Boolean) {
+        val svc = ARangerAccessibilityService.instance
+        val pt = MacroRepository.getPickedPoint(this)
+        if (svc == null) {
+            if (showToastResult) {
+                Toast.makeText(this, "접근성 서비스가 켜져 있어야 픽셀 색상을 추출할 수 있습니다.", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        overlayScope.launch {
+            crosshairView?.alpha = 0f
+            delay(85L)
+            val hex = svc.samplePixelColor(pt.first, pt.second)
+            crosshairView?.alpha = 1f
+            if (hex != null) {
+                MacroRepository.savePickedPoint(
+                    this@FloatingOverlayService,
+                    pt.first,
+                    pt.second,
+                    colorHex = hex
+                )
+                updateHeaderInfo(pt.first, pt.second, hex)
+                if (showToastResult) {
+                    Toast.makeText(
+                        this@FloatingOverlayService,
+                        "🎨 좌표 (${pt.first}, ${pt.second}) 색상 추출: $hex",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } else if (showToastResult) {
+                Toast.makeText(
+                    this@FloatingOverlayService,
+                    "📌 좌표 (${pt.first}, ${pt.second}) 저장됨",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    private fun createColorConditionalMacro() {
+        val pt = MacroRepository.getPickedPoint(this)
+        val hex = MacroRepository.getPickedColorHex(this)
+        val rule = MacroRule(
+            name = "🎨 색상 감지 터치 (${pt.first},${pt.second} = $hex)",
+            enabled = true,
+            triggerType = TriggerType.MANUAL_FLOATING,
+            constraintType = ConstraintType.NONE,
+            actions = listOf(
+                ActionStep(
+                    type = ActionType.LOOP_UNTIL_COLOR,
+                    x = pt.first,
+                    y = pt.second,
+                    colorHex = hex,
+                    durationMs = 95L,
+                    repeatCount = 20,
+                    repeatIntervalMs = 400L
+                ),
+                ActionStep(
+                    type = ActionType.TOAST_VIBRATE,
+                    textParam = "🎨 색상($hex) 일치 확인 후 자동 터치 완료!"
+                )
+            )
+        )
+        MacroRepository.upsertMacro(this, rule)
+        Toast.makeText(
+            this,
+            "✅ 「${rule.name}」 매크로가 생성되었습니다! 리모컨 [▶ 실행]으로 바로 작동합니다.",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
+    /**
+     * 📹 자유 곡선·패턴 제스처 레코더 오버레이:
+     * 화면 전체에 반투명 드로잉 캔버스를 띄워 사용자가 한 손가락으로 그린 곡선/스와이프/패턴을
+     * 그대로 녹화하고 즉시 실행 가능한 매크로로 저장합니다.
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun showTouchPathRecorderOverlay() {
+        removePathRecorderOverlay()
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            overlayWindowType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        )
+
+        val container = FrameLayout(this).apply {
+            setBackgroundColor(Color.parseColor("#660F172A"))
+        }
+
+        val drawPath = Path()
+        val sampledPts = mutableListOf<Pair<Int, Int>>()
+        var downTimeMs = 0L
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#38BDF8")
+            style = Paint.Style.STROKE
+            strokeWidth = dp(5).toFloat()
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+
+        val canvasView = object : View(this) {
+            override fun onDraw(canvas: Canvas) {
+                super.onDraw(canvas)
+                canvas.drawPath(drawPath, paint)
+            }
+        }
+
+        val banner = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(12).toFloat()
+                setColor(Color.parseColor("#EE0F172A"))
+                setStroke(dp(1), Color.parseColor("#E11D48"))
+            }
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                topMargin = dp(60)
+            }
+        }
+
+        val bannerTv = TextView(this).apply {
+            text = "📹 화면 위에 원하는 스와이프·곡선·패턴을 한 번에 그리세요! (손을 떼면 즉시 저장)"
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, 0, dp(10), 0)
+        }
+        val cancelBtn = createChipButton("취소 ✕", "#475569") {
+            removePathRecorderOverlay()
+        }
+        banner.addView(bannerTv)
+        banner.addView(cancelBtn)
+
+        canvasView.setOnTouchListener { v, event ->
+            val rx = event.rawX.toInt()
+            val ry = event.rawY.toInt()
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    drawPath.reset()
+                    sampledPts.clear()
+                    downTimeMs = System.currentTimeMillis()
+                    drawPath.moveTo(event.x, event.y)
+                    sampledPts.add(Pair(rx, ry))
+                    v.invalidate()
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    drawPath.lineTo(event.x, event.y)
+                    val last = sampledPts.lastOrNull()
+                    if (last == null || abs(rx - last.first) + abs(ry - last.second) >= 12) {
+                        if (sampledPts.size < 120) {
+                            sampledPts.add(Pair(rx, ry))
+                        }
+                    }
+                    v.invalidate()
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    sampledPts.add(Pair(rx, ry))
+                    val durMs = (System.currentTimeMillis() - downTimeMs).coerceIn(120L, 8000L)
+                    if (sampledPts.size >= 2) {
+                        val ptsArr = JSONArray()
+                        sampledPts.forEach { pt ->
+                            ptsArr.put(JSONArray().put(pt.first).put(pt.second))
+                        }
+                        val pathJson = JSONObject().apply {
+                            put("durationMs", durMs)
+                            put("points", ptsArr)
+                        }.toString()
+
+                        MacroRepository.saveRecordedPathJson(this, pathJson, sampledPts.size, durMs)
+                        val newRule = MacroRule(
+                            name = "📹 자유 궤적 제스처 (${sampledPts.size}점, ${durMs}ms)",
+                            enabled = true,
+                            triggerType = TriggerType.MANUAL_FLOATING,
+                            constraintType = ConstraintType.NONE,
+                            actions = listOf(
+                                ActionStep(
+                                    type = ActionType.CUSTOM_GESTURE_PATH,
+                                    durationMs = durMs,
+                                    repeatCount = 1,
+                                    gesturePathJson = pathJson
+                                )
+                            )
+                        )
+                        MacroRepository.upsertMacro(this, newRule)
+                        Toast.makeText(
+                            this,
+                            "✅ 「${newRule.name}」 녹화 완료! 리모컨 [▶ 실행]을 누르면 그대로 재현됩니다.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    removePathRecorderOverlay()
+                    true
+                }
+                else -> false
+            }
+        }
+
+        container.addView(canvasView)
+        container.addView(banner)
+        pathRecorderView = container
+        windowManager.addView(container, params)
+    }
+
+    private fun removePathRecorderOverlay() {
+        pathRecorderView?.let {
+            try {
+                windowManager.removeView(it)
+            } catch (_: Exception) {
+            }
+        }
+        pathRecorderView = null
     }
 
     private fun addCurrentCrosshairPin() {
@@ -509,9 +795,6 @@ class FloatingOverlayService : Service() {
         crosshairVisible = false
     }
 
-    /**
-     * 🔍 실시간 화면 UI 분석기 오버레이 창을 띄워 현재 화면의 모든 버튼/글자/View ID를 보여줍니다.
-     */
     private fun showUiInspectorOverlay() {
         removeInspectorModal()
         val svc = ARangerAccessibilityService.instance
@@ -565,7 +848,7 @@ class FloatingOverlayService : Service() {
         modal.addView(topBar)
 
         val guideTv = TextView(this).apply {
-            text = "원하는 버튼/글자를 누르면 좌표·ID가 저장되며, [매크로 생성]을 누르면 즉시 자동 클릭 규칙으로 등록됩니다."
+            text = "원하는 버튼/글자를 누르면 좌표·ID가 저장되며, [⚡ 매크로화]를 누르면 즉시 자동 클릭 규칙으로 등록됩니다."
             setTextColor(Color.parseColor("#94A3B8"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
             setPadding(0, 0, 0, dp(8))
@@ -622,7 +905,11 @@ class FloatingOverlayService : Service() {
                             item.text.ifBlank { item.contentDesc },
                             item.viewId
                         )
-                        coordLabel?.text = "⚡ A-ranger Pro  (${item.centerX}, ${item.centerY})"
+                        updateHeaderInfo(
+                            item.centerX,
+                            item.centerY,
+                            MacroRepository.getPickedColorHex(this@FloatingOverlayService)
+                        )
                         Toast.makeText(
                             this@FloatingOverlayService,
                             "📌 타겟 저장됨: (${item.centerX}, ${item.centerY})",
@@ -716,9 +1003,9 @@ class FloatingOverlayService : Service() {
         return TextView(this).apply {
             text = label
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setTypeface(typeface, Typeface.BOLD)
-            setPadding(dp(9), dp(6), dp(9), dp(6))
+            setPadding(dp(8), dp(6), dp(8), dp(6))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(8).toFloat()

@@ -138,7 +138,7 @@ class MainActivity : AppCompatActivity() {
             setTypeface(typeface, Typeface.BOLD)
         }
         val subTv = TextView(this).apply {
-            text = "v$curName · 화면 제어 · UI 분석기 · 자동 업데이트"
+            text = "v$curName · 픽셀 스포이드 · 궤적녹화 · 안티감지 · 자가복구"
             setTextColor(Color.parseColor("#94A3B8"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
         }
@@ -260,11 +260,14 @@ class MainActivity : AppCompatActivity() {
         )
 
         val picked = MacroRepository.getPickedPoint(this)
+        val pickedColor = MacroRepository.getPickedColorHex(this)
         val pickedNode = MacroRepository.getPickedNodeInfo(this)
+        val hasPath = MacroRepository.getLastRecordedPathJson(this).isNotBlank()
         val extraInfo = buildString {
-            append("🎯 최근 타겟 좌표: (${picked.first}, ${picked.second})")
+            append("🎯 최근 타겟: (${picked.first}, ${picked.second}) · 🎨 색상: $pickedColor")
             if (pickedNode.first.isNotBlank()) append(" · 글자: 「${pickedNode.first}」")
             if (pickedNode.second.isNotBlank()) append(" · ID: ${pickedNode.second.substringAfterLast('/')}")
+            if (hasPath) append(" · 📹 궤적녹화됨")
         }
         val pickedInfo = TextView(this).apply {
             text = extraInfo
@@ -277,9 +280,9 @@ class MainActivity : AppCompatActivity() {
         val floatingOn = FloatingOverlayService.isRunning
         val floatingBtn = TextView(this).apply {
             text = if (floatingOn) {
-                "⏹ 화면 위 플로팅 리모컨 & UI 분석기 끄기"
+                "⏹ 화면 위 플로팅 리모컨 · 스포이드 · 궤적녹화 끄기"
             } else {
-                "🎮 화면 위 플로팅 리모컨 · 조준기 · UI 분석기 띄우기"
+                "🎮 화면 위 플로팅 리모컨 · 스포이드 · 궤적녹화 · UI분석기 띄우기"
             }
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -360,6 +363,36 @@ class MainActivity : AppCompatActivity() {
                 checked = MacroRepository.isAutoSkipAdEnabled(this)
             ) { isChecked ->
                 MacroRepository.setAutoSkipAdEnabled(this, isChecked)
+            }
+        )
+
+        card.addView(
+            buildGuardToggleRow(
+                title = "🛡️ 안티 매크로 우회 (Humanizer 랜덤 좌표·간격)",
+                subtitle = "터치 좌표를 ±7px, 속도와 간격을 ±15% 범위에서 사람 손처럼 미세하게 변조",
+                checked = MacroRepository.isHumanizerEnabled(this)
+            ) { isChecked ->
+                MacroRepository.setHumanizerEnabled(this, isChecked)
+            }
+        )
+
+        card.addView(
+            buildGuardToggleRow(
+                title = "🔊 볼륨[↓] 버튼 & 스마트폰 흔들기 긴급 정지",
+                subtitle = "매크로 실행 중 볼륨 다운 키를 누르거나 폰을 흔들면 진행 중인 동작을 즉시 중단",
+                checked = MacroRepository.isVolumePanicEnabled(this)
+            ) { isChecked ->
+                MacroRepository.setVolumePanicEnabled(this, isChecked)
+            }
+        )
+
+        card.addView(
+            buildGuardToggleRow(
+                title = "♻️ 24시간 무중단 자가 복구 (Self-Healing 워치독)",
+                subtitle = "OS 절전이나 업데이트로 접근성 서비스가 풀려도 5초 내 자동으로 다시 활성화",
+                checked = MacroRepository.isSelfHealingEnabled(this)
+            ) { isChecked ->
+                MacroRepository.setSelfHealingEnabled(this, isChecked)
             }
         )
 
