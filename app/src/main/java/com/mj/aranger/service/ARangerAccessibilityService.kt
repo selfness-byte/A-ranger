@@ -469,12 +469,27 @@ class ARangerAccessibilityService : AccessibilityService(), SensorEventListener 
         }
 
         // 2차: 화면 캡처 Bitmap 기반 온디바이스 비전 글리프 OCR 스캔
-        val softBitmap = captureScreenBitmap() ?: return null
-        return try {
-            VisionOcrEngine.findTextByVisualOcr(softBitmap, query)
-        } finally {
-            softBitmap.recycle()
+        val softBitmap = captureScreenBitmap()
+        if (softBitmap != null) {
+            try {
+                val ocrPt = VisionOcrEngine.findTextByVisualOcr(softBitmap, query)
+                if (ocrPt != null) return ocrPt
+            } finally {
+                softBitmap.recycle()
+            }
         }
+
+        // 3차: 현재 활성 윈도우(자가 테스트 등) 노드 좌표 폴백
+        rootInActiveWindow?.let { activeRoot ->
+            findMatchingNode(activeRoot, query, 0)?.let { matched ->
+                val rect = Rect()
+                matched.getBoundsInScreen(rect)
+                if (!rect.isEmpty && rect.centerX() > 0 && rect.centerY() > 0) {
+                    return Pair(rect.centerX(), rect.centerY())
+                }
+            }
+        }
+        return null
     }
 
     suspend fun clickTextByHybridOcr(targetText: String, durationMs: Long = 95L): Boolean {

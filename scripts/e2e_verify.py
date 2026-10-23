@@ -128,6 +128,42 @@ def pixel_hex(x, y):
     return f"#{r:02X}{g:02X}{b:02X}", w, h
 
 
+def build_template_json_from_screencap(cx, cy, patch_size=64, grid_size=16):
+    raw = adb("exec-out", "screencap", binary=True)
+    w, h = struct.unpack_from("<II", raw, 0)
+    header = len(raw) - w * h * 4
+    half = patch_size // 2
+    left = max(0, min(cx - half, w - patch_size))
+    top = max(0, min(cy - half, h - patch_size))
+    cell = patch_size // grid_size
+    hex_parts = []
+    for gy in range(grid_size):
+        for gx in range(grid_size):
+            r_sum = g_sum = b_sum = cnt = 0
+            for py in range(top + gy * cell, top + (gy + 1) * cell):
+                for px in range(left + gx * cell, left + (gx + 1) * cell):
+                    off = header + (py * w + px) * 4
+                    r_sum += raw[off]
+                    g_sum += raw[off + 1]
+                    b_sum += raw[off + 2]
+                    cnt += 1
+            hex_parts.append(f"{r_sum // cnt:02X}{g_sum // cnt:02X}{b_sum // cnt:02X}")
+    c_off = header + ((top + half) * w + (left + half)) * 4
+    c_hex = f"#{raw[c_off]:02X}{raw[c_off + 1]:02X}{raw[c_off + 2]:02X}"
+    return json.dumps({
+        "v": 1,
+        "origX": left + half,
+        "origY": top + half,
+        "screenW": w,
+        "screenH": h,
+        "patchSize": patch_size,
+        "gridSize": grid_size,
+        "centerHex": c_hex,
+        "rgbGrid": "".join(hex_parts),
+        "thumbBase64": ""
+    })
+
+
 def music_volume():
     out = adb("shell", "cmd", "media_session", "volume", "--stream", "3", "--get")
     return out.splitlines()[-1] if out else ""
@@ -168,10 +204,12 @@ def main():
         original = open(backup_path, "rb").read()
     else:
         open(backup_path, "wb").write(original)
-    # 원본에서 이전 테스트 잔여 매크로(verify-*)를 항상 제거
+    # 원본에서 이전 테스트 잔여 매크로(verify-*)를 항상 제거하고 핵심 스마트 가드 3종을 활성화 유지
     clean_macros = [m for m in json.loads(get_pref_string(original, "macros_json") or "[]")
                     if not m.get("id", "").startswith("verify-")]
     original = set_pref(original, "macros_json", json.dumps(clean_macros, ensure_ascii=False))
+    for key in ("self_healing_enabled", "volume_panic_enabled", "humanizer_enabled"):
+        original = set_pref(original, key, "true", tag="boolean")
     open(backup_path, "wb").write(original)
     ORIGINAL["xml"] = original
     replaced_logs = [l for l in logs(read_prefs()) if "자가 복구 워치독" in l.get("macroName", "")]
@@ -179,11 +217,12 @@ def main():
           bool(replaced_logs),
           replaced_logs[0]["message"] if replaced_logs else "로그 없음")
 
-    # ---- 기준 픽셀 색상 측정 (MainActivity 좌측 여백) ----
+    # ---- 기준 픽셀 색상 및 이미지 템플릿 측정 (MainActivity 좌측 여백) ----
     adb("shell", "am", "start", "-n", f"{PKG}/.ui.MainActivity")
     time.sleep(2.5)
     px, py = 18, 1500
     expected, w, h = pixel_hex(px, py)
+    tpl_json = build_template_json_from_screencap(px, py)
     print(f"   기준 픽셀 ({px},{py}) = {expected}  (화면 {w}x{h})")
 
     # ---- 테스트 매크로 주입 ----
@@ -195,13 +234,19 @@ def main():
         "id": "verify-a", "name": "VERIFY-A", "enabled": True,
         "triggerType": "INTERVAL_TIMER", "triggerParam": "3600",
         "constraintType": "NONE", "constraintParam": "", "cooldownMs": 1000,
+        "repeatCount": 3, "repeatDelayMs": 300,
         "lastRunAt": 0, "runCount": 0,
         "actions": [
             {"type": "WAIT", "durationMs": 9000},
             {"type": "TAP_IF_COLOR", "x": px, "y": py, "durationMs": 60, "colorHex": expected},
             {"type": "TAP_IF_COLOR", "x": px, "y": py, "durationMs": 60, "colorHex": "#FF00FF"},
             {"type": "CUSTOM_GESTURE_PATH", "durationMs": 320, "repeatCount": 1, "gesturePathJson": path_json},
+            {"type": "CLICK_IMAGE_TEMPLATE", "x": px, "y": py, "x2": 36, "durationMs": 60, "templateJson": tpl_json},
+            {"type": "OCR_CLICK_TEXT", "textParam": "A-ranger", "durationMs": 60},
+            {"type": "BRANCH_IF_COLOR", "x": px, "y": py, "x2": 2, "colorHex": "#FF00FF"},
+            {"type": "WEBHOOK_HTTP", "textParam": "https://inanimals-1977.web.app/version.json?SHOULD_BE_SKIPPED=1"},
             {"type": "WEBHOOK_HTTP", "textParam": "https://inanimals-1977.web.app/version.json?verify={time}&pkg={pkg}"},
+            {"type": "BRANCH_IF_COLOR", "x": px, "y": py, "x2": 1, "colorHex": expected},
         ],
     }
     test_b = {
@@ -255,9 +300,25 @@ def main():
 
     a_started = any(e["macroName"] == "VERIFY-A" and "발동됨" in e["message"] for e in entries)
     a_fail_steps = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "미수행" in e["message"]]
+    img_matched = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "이미지 매칭 성공" in e["message"]]
+    ocr_matched = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "비전 OCR" in e["message"]]
+    skip_logged = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "다음 단계" in e["message"] and "건너뜀" in e["message"]]
+    skipped_hook_fired = any("SHOULD_BE_SKIPPED" in e["message"] for e in entries)
+    abort_logged = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "매크로가 종료되었습니다" in e["message"]]
+
     check("2a. 🎨 색상 일치 시 TAP_IF_COLOR 실행", a_started and not any("단계 2 " in m for m in a_fail_steps),
           f"기준색 {expected}")
     check("2b. 🎨 색상 불일치(#FF00FF) 시 터치 건너뜀", any("단계 3 " in m for m in a_fail_steps))
+    check("2c. 🖼️ 이미지 템플릿 매칭 서치 터치 (CLICK_IMAGE_TEMPLATE)",
+          bool(img_matched), img_matched[0] if img_matched else "이미지 매칭 로그 없음")
+    check("2d. 👁️ 하이브리드 온디바이스 비전 OCR 터치 (OCR_CLICK_TEXT)",
+          bool(ocr_matched), ocr_matched[0] if ocr_matched else "비전 OCR 로그 없음")
+    check("2e. 🔀 조건 분기 SKIP_NEXT (조건 불일치 시 다음 단계 건너뛰기)",
+          bool(skip_logged) and not skipped_hook_fired,
+          skip_logged[0] if skip_logged else "SKIP_NEXT 로그 없음")
+    check("2f. 🔀 조건 분기 ABORT_MACRO (3회 반복 루프 조건부 탈출)",
+          bool(abort_logged) and len(img_matched) == 1,
+          abort_logged[0] if abort_logged else "ABORT_MACRO 로그 없음")
     check("3.  📹 자유 궤적 제스처 재생", a_started and not any("단계 4 " in m for m in a_fail_steps))
     hook = [e for e in entries if e["macroName"].startswith("🌐") and "verify=" in e["message"]]
     check("4.  🌐 웹훅 전송 + {time}/{pkg} 치환",

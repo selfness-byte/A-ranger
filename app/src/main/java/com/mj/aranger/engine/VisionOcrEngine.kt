@@ -394,7 +394,7 @@ object VisionOcrEngine {
                         val contrast = abs(fgMean - bgMean)
                         if (contrast < 32.0) continue
 
-                        // 획 픽셀들의 일관성(낮은 표준편차) 검사
+                        // 획 픽셀들과 배경 픽셀들의 일관성(낮은 편차) 검사 → 글자 모양과 정확히 맞을 때만 고득점 부여
                         var fgVar = 0.0
                         for (i in fgIndices.indices) {
                             val off = fgIndices[i]
@@ -403,8 +403,17 @@ object VisionOcrEngine {
                             val v = lum[(y + py) * sw + (x + px)] - fgMean
                             fgVar += abs(v)
                         }
+                        var bgVar = 0.0
+                        for (i in bgIndices.indices) {
+                            val off = bgIndices[i]
+                            val py = off shr 16
+                            val px = off and 0xFFFF
+                            val v = lum[(y + py) * sw + (x + px)] - bgMean
+                            bgVar += abs(v)
+                        }
                         val fgMad = fgVar / fgIndices.size
-                        val score = contrast - (fgMad * 0.9)
+                        val bgMad = bgVar / bgIndices.size
+                        val score = contrast - (fgMad * 0.75) - (bgMad * 0.75)
                         if (score > bestScore) {
                             bestScore = score
                             bestCenterX = (x + mw / 2) * scale
