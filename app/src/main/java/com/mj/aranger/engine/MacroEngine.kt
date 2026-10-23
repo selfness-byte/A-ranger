@@ -47,11 +47,12 @@ object MacroEngine {
     private val lastTriggeredMap = ConcurrentHashMap<String, Long>()
     private val dailyFiredKeyMap = ConcurrentHashMap<String, String>()
 
-    @Volatile
-    var isExecuting: Boolean = false
-        private set
+    /** 동시에 실행 중인 모든 매크로 Job (긴급 정지 시 전부 취소하기 위해 추적) */
+    private val runningJobs = java.util.Collections.newSetFromMap(ConcurrentHashMap<Job, Boolean>())
 
-    private var activeExecutionJob: Job? = null
+    val isExecuting: Boolean
+        get() = runningJobs.any { it.isActive }
+
     private var timerLoopJob: Job? = null
     private var lastChargingState: Boolean = false
     private var lastBatteryPercent: Int = 100
@@ -99,7 +100,9 @@ object MacroEngine {
                     val last = lastTriggeredMap[rule.id] ?: 0L
                     if (now - last >= intervalMs) {
                         lastTriggeredMap[rule.id] = now
-                        evaluateAndRun(appCtx, rule, "타이머(${intervalSec}초)")
+                        // 주기 자체가 실행 간격을 제한하므로 쿨다운 검사는 건너뜁니다.
+                        // (직전에 lastTriggeredMap을 now로 갱신했기 때문에 쿨다운 검사를 하면 항상 차단되던 버그 수정)
+                        evaluateAndRun(appCtx, rule, "타이머(${intervalSec}초)", ignoreCooldown = true)
                     }
                 }
 
@@ -141,16 +144,16 @@ object MacroEngine {
         context: Context,
         reason: String = "사용자에 의해 실행 중인 매크로가 즉시 중단되었습니다."
     ) {
-        activeExecutionJob?.cancel()
-        activeExecutionJob = null
-        isExecuting = false
+        val cancelled = runningJobs.count { it.isActive }
+        runningJobs.forEach { it.cancel() }
+        runningJobs.clear()
         vibrateShort(context)
         showToast(context, "⏹ $reason")
         MacroRepository.addLog(
             context,
             LogEntry(
                 macroName = "긴급 실행 중지",
-                message = reason,
+                message = "$reason (중단된 매크로 ${cancelled}개)",
                 isSuccess = true
             )
         )
@@ -273,8 +276,7 @@ object MacroEngine {
         lastTriggeredMap[rule.id] = now
         MacroRepository.markMacroExecuted(context, rule.id)
 
-        activeExecutionJob = scope.launch {
-            isExecuting = true
+        val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             try {
                 MacroRepository.addLog(
                     context,
@@ -310,9 +312,11 @@ object MacroEngine {
                     )
                 )
             } finally {
-                isExecuting = false
+                runningJobs.remove(coroutineContext[Job])
             }
         }
+        runningJobs.add(job)
+        job.start()
     }
 
     private fun humanizeInterval(context: Context, baseMs: Long): Long {
@@ -399,7 +403,7 @@ object MacroEngine {
             ActionType.LOOP_UNTIL_COLOR -> {
                 val svc = ARangerAccessibilityService.instance ?: return false
                 val maxTries = step.repeatCount.coerceIn(1, 500)
-                val interval = step.repeatIntervalMs.coerceAtLeast(250L)
+                val interval = step.repeatIntervalMs.coerceAtLeast(350L)
                 for (i in 0 until maxTries) {
                     val sampled = svc.samplePixelColor(step.x, step.y)
                     if (sampled != null && ARangerAccessibilityService.colorsMatch(sampled, step.colorHex)) {

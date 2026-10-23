@@ -1,11 +1,11 @@
 {
   "appName": "A-ranger Pro",
   "packageId": "com.mj.aranger",
-  "versionCode": 4,
-  "versionName": "1.3.0",
-  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.3.0.apk",
-  "sha256": "804506de5ef2947786d006dc28bc1eefb727bbf17b79af9908218c8af4f06813",
-  "sizeBytes": 5846046,
+  "versionCode": 5,
+  "versionName": "1.3.1",
+  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.3.1.apk",
+  "sha256": "4909291a01ef618e3f6635ccf8a692e53c09e85f2b04f71cfc7c9ed4f97e7732",
+  "sizeBytes": 5848414,
   "updatedAt": "2026-10-23",
-  "notes": "• 🎨 화면 픽셀 색상 스포이드 & 조건부 터치: 조준기로 찍은 위치의 #RRGGBB 색상을 실시간 추출하고, 특정 색상이 뜰 때만 자동 터치/대기 루프 실행\n• 📹 자유 곡선·패턴 제스처 레코더: 화면 위에 손가락으로 그린 곡선/스와이프/패턴 궤적을 그대로 녹화하여 재현\n• 🔊 볼륨[↓] 버튼 & 스마트폰 흔들기 긴급 정지(Panic Stop): 매크로 실행 중 언제든 볼륨 다운 키를 누르거나 폰을 흔들면 즉시 중단\n• 🛡️ 안티 매크로 우회(Humanizer 모드): 터치 좌표 ±7px, 속도·간격 ±15% 미세 랜덤 변조로 사람 손터치 패턴 구현\n• 🌐 웹훅(Webhook HTTP) 전송 액션: 알림 내용({noti}), 실행 앱({pkg}), 시각({time})을 외부 URL로 자동 전송\n• ♻️ 24시간 무중단 자가 복구 워치독(Self-Healing): OS 절전이나 업데이트로 접근성 서비스가 풀려도 5초 내 자동 복구 및 전 버전 무관 자동 업데이트 지원"
+  "notes": "• [버그 수정] ⏱️ 주기적 반복 타이머 매크로가 실행되지 않던 문제 수정 (v1.0부터 있던 쿨다운 충돌)\n• [버그 수정] 서버 버전이 더 낮을 때 다운그레이드 업데이트를 제안하던 문제 수정\n• [버그 수정] 🔊 긴급 정지 시 동시에 실행 중인 모든 매크로를 중단하도록 개선 (기존: 마지막 1개만 중단)\n• [안정성] 🎨 픽셀 색상 추출 호출 간격 자동 조절 (연속 색상 검사 시 시스템 거부 방지)\n• v1.3.0 기능: 픽셀 스포이드·색상 조건 터치, 자유 궤적 레코더, 볼륨[↓]·흔들기 긴급 정지, Humanizer, 웹훅, 24시간 자가 복구"
 }

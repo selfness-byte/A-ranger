@@ -187,9 +187,11 @@ object MacroRepository {
             }
             Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
             true
-        } catch (_: SecurityException) {
+        } catch (e: SecurityException) {
+            android.util.Log.w("ARangerSelfHeal", "WRITE_SECURE_SETTINGS 거부", e)
             false
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.w("ARangerSelfHeal", "접근성 자가복구 실패", e)
             false
         }
     }

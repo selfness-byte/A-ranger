@@ -15,6 +15,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Display
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
@@ -26,8 +27,11 @@ import com.mj.aranger.store.MacroRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import kotlin.coroutines.resume
 import kotlin.math.abs
@@ -58,6 +62,9 @@ class ARangerAccessibilityService : AccessibilityService(), SensorEventListener 
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val screenshotMutex = Mutex()
+    private var lastScreenshotAt = 0L
+    private val MIN_SCREENSHOT_INTERVAL_MS = 350L
     private var lastContentCheckTime = 0L
     private var lastAutoGuardTime = 0L
 
@@ -345,6 +352,18 @@ class ARangerAccessibilityService : AccessibilityService(), SensorEventListener 
      * 🎨 화면 특정 (x, y) 좌표의 실제 픽셀 색상(#RRGGBB)을 추출합니다 (Android 11 / API 30+).
      */
     suspend fun samplePixelColor(x: Int, y: Int): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        // 시스템은 takeScreenshot 호출 간격이 약 333ms 미만이면 거부하므로, 호출을 직렬화하고 최소 간격을 보장합니다.
+        return screenshotMutex.withLock {
+            val wait = MIN_SCREENSHOT_INTERVAL_MS - (SystemClock.uptimeMillis() - lastScreenshotAt)
+            if (wait > 0) delay(wait)
+            val result = captureAndReadPixel(x, y)
+            lastScreenshotAt = SystemClock.uptimeMillis()
+            result
+        }
+    }
+
+    private suspend fun captureAndReadPixel(x: Int, y: Int): String? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         return suspendCancellableCoroutine { cont ->
             try {

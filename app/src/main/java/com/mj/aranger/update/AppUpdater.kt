@@ -104,7 +104,8 @@ object AppUpdater {
             val info = fetchLatestUpdate(activity) ?: return@launch
             val curCode = installedVersionCode(activity)
             val curName = installedVersionName(activity)
-            if ((info.versionCode > curCode || info.versionName != curName) &&
+            // 서버 빌드가 설치본보다 "높을 때만" 알립니다 (versionName만 다르거나 서버가 더 낮으면 다운그레이드 제안이 되므로 제외)
+            if (info.versionCode > curCode &&
                 !activity.isFinishing && !activity.isDestroyed
             ) {
                 showUpdateDialog(activity, scope, info, forceOffer = true)
@@ -140,6 +141,10 @@ object AppUpdater {
 
             if (info.versionCode > curCode) {
                 onStatus("🚀 새 버전 발견: v${info.versionName} (build ${info.versionCode}) ← 현재 v$curName")
+            } else if (info.versionCode < curCode) {
+                // Android는 같은 서명이라도 낮은 versionCode 설치(다운그레이드)를 거부하므로 설치를 시도하지 않습니다.
+                onStatus("✅ 현재 v$curName (build $curCode)이 서버 v${info.versionName} (build ${info.versionCode})보다 최신입니다")
+                return@launch
             } else {
                 onStatus("✅ 서버 최신 버전: v${info.versionName} (build ${info.versionCode}) · 전 버전 무관 덮어쓰기 업데이트 가능")
             }
@@ -205,7 +210,7 @@ object AppUpdater {
     ) {
         val curName = installedVersionName(activity)
         val curCode = installedVersionCode(activity)
-        val isNewer = info.versionCode > curCode || info.versionName != curName
+        val isNewer = info.versionCode > curCode
         val title = if (isNewer) {
             "🚀 새 버전 업데이트 (v${info.versionName})"
         } else {
