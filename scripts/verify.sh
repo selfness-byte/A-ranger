@@ -42,8 +42,8 @@ echo "- inanimals-1977.web.app/version.json (com.mj.aranger)"
 curl -fsSL "https://inanimals-1977.web.app/version.json?t=$(date +%s)" | grep -A 3 '"com.mj.aranger"' | grep -E "latest_version|version_code"
 
 echo "\n=== [9] GitHub APK 해시 대조 ==="
-LOCAL=$(shasum -a 256 /Volumes/M/A-ranger/dist/A-ranger-1.3.1.apk | cut -d' ' -f1)
-REMOTE=$(curl -fsSL "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.3.1.apk" | shasum -a 256 | cut -d' ' -f1)
+LOCAL=$(shasum -a 256 /Volumes/M/A-ranger/dist/A-ranger-1.4.0.apk | cut -d' ' -f1)
+REMOTE=$(curl -fsSL "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.4.0.apk" | shasum -a 256 | cut -d' ' -f1)
 echo "local : $LOCAL"
 echo "remote: $REMOTE"
 [ "$LOCAL" = "$REMOTE" ] && echo "✅ GitHub APK 해시 일치" || echo "❌ GitHub APK 해시 불일치"

@@ -174,7 +174,7 @@ class FloatingOverlayService : Service() {
         }
 
         val notification = builder
-            .setContentTitle("A-ranger Pro v1.3 화면 제어 리모컨 실행 중")
+            .setContentTitle("A-ranger Pro v1.4 화면 제어·비전 리모컨 실행 중")
             .setContentText("터치하여 A-ranger 대시보드 열기")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(pendingIntent)
@@ -303,18 +303,41 @@ class FloatingOverlayService : Service() {
         buttonRow.addView(btnClose)
         root.addView(buttonRow)
 
-        // 서브 레코더 행 (조준기가 켜졌을 때만 표시: [🎨 스포이드] [🎨 색상매크로] [➕ 핀추가] [💾 핀매크로] [초기화])
-        val recorderRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        // 서브 레코더 컨테이너 (조준기가 켜졌을 때만 2줄로 깔끔하게 표시)
+        val recorderCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             visibility = View.GONE
             setPadding(0, dp(6), 0, 0)
+        }
+
+        val visionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
         val btnEyedropper = createChipButton("🎨 스포이드", "#0D9488") {
             sampleColorAtCrosshair(showToastResult = true)
         }
         val btnColorMacro = createChipButton("🎨 색상매크로", "#9333EA") {
             createColorConditionalMacro()
+        }
+        val btnCaptureImg = createChipButton("🖼️ 조각캡처", "#EA580C") {
+            captureTemplateAtCrosshair()
+        }
+        val btnImgMacro = createChipButton("🖼️ 이미지매크로", "#2563EB") {
+            createImageTemplateMacro()
+        }
+        visionRow.addView(btnEyedropper)
+        visionRow.addView(spaceView(4))
+        visionRow.addView(btnColorMacro)
+        visionRow.addView(spaceView(4))
+        visionRow.addView(btnCaptureImg)
+        visionRow.addView(spaceView(4))
+        visionRow.addView(btnImgMacro)
+
+        val pinRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, 0)
         }
         val btnAddPin = createChipButton("➕ 핀추가", "#0284C7") {
             addCurrentCrosshairPin()
@@ -326,17 +349,16 @@ class FloatingOverlayService : Service() {
             clearPinMarkers()
             Toast.makeText(this, "찍어둔 핀을 모두 지웠습니다.", Toast.LENGTH_SHORT).show()
         }
-        recorderRow.addView(btnEyedropper)
-        recorderRow.addView(spaceView(4))
-        recorderRow.addView(btnColorMacro)
-        recorderRow.addView(spaceView(4))
-        recorderRow.addView(btnAddPin)
-        recorderRow.addView(spaceView(4))
-        recorderRow.addView(btnSaveSeq)
-        recorderRow.addView(spaceView(4))
-        recorderRow.addView(btnClearPins)
-        subRecorderRow = recorderRow
-        root.addView(recorderRow)
+        pinRow.addView(btnAddPin)
+        pinRow.addView(spaceView(4))
+        pinRow.addView(btnSaveSeq)
+        pinRow.addView(spaceView(4))
+        pinRow.addView(btnClearPins)
+
+        recorderCol.addView(visionRow)
+        recorderCol.addView(pinRow)
+        subRecorderRow = recorderCol
+        root.addView(recorderCol)
 
         // 패널 드래그 이동 처리
         var startX = 0
@@ -540,6 +562,110 @@ class FloatingOverlayService : Service() {
             "✅ 「${rule.name}」 매크로가 생성되었습니다! 리모컨 [▶ 실행]으로 바로 작동합니다.",
             Toast.LENGTH_LONG
         ).show()
+    }
+
+    /**
+     * 🖼️ 조준기 중심(x, y) 주변의 64×64 아이콘·버튼 이미지를 캡처하여 템플릿으로 저장합니다.
+     */
+    private fun captureTemplateAtCrosshair() {
+        val svc = ARangerAccessibilityService.instance
+        val pt = MacroRepository.getPickedPoint(this)
+        if (svc == null) {
+            Toast.makeText(this, "접근성 서비스가 켜져 있어야 이미지 조각을 캡처할 수 있습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        overlayScope.launch {
+            crosshairView?.alpha = 0f
+            panelView?.alpha = 0f
+            delay(95L)
+            val tplJson = svc.captureImageTemplateAt(pt.first, pt.second, patchSize = 64)
+            crosshairView?.alpha = 1f
+            panelView?.alpha = 1f
+            if (!tplJson.isNullOrBlank()) {
+                val centerHex = runCatching {
+                    JSONObject(tplJson).optString("centerHex", "#38BDF8")
+                }.getOrDefault("#38BDF8")
+                MacroRepository.saveCapturedTemplateJson(
+                    this@FloatingOverlayService,
+                    tplJson,
+                    pt.first,
+                    pt.second,
+                    centerHex
+                )
+                updateHeaderInfo(pt.first, pt.second, centerHex)
+                Toast.makeText(
+                    this@FloatingOverlayService,
+                    "🖼️ (${pt.first}, ${pt.second}) 64×64 아이콘 조각 캡처 완료!",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                Toast.makeText(
+                    this@FloatingOverlayService,
+                    "⚠️ 화면 이미지 캡처에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    private fun createImageTemplateMacro() {
+        val svc = ARangerAccessibilityService.instance
+        val pt = MacroRepository.getPickedPoint(this)
+        overlayScope.launch {
+            var tplJson = MacroRepository.getLastCapturedTemplateJson(this@FloatingOverlayService)
+            if (tplJson.isBlank() && svc != null) {
+                crosshairView?.alpha = 0f
+                panelView?.alpha = 0f
+                delay(95L)
+                tplJson = svc.captureImageTemplateAt(pt.first, pt.second, patchSize = 64).orEmpty()
+                crosshairView?.alpha = 1f
+                panelView?.alpha = 1f
+                if (tplJson.isNotBlank()) {
+                    MacroRepository.saveCapturedTemplateJson(
+                        this@FloatingOverlayService,
+                        tplJson,
+                        pt.first,
+                        pt.second
+                    )
+                }
+            }
+
+            if (tplJson.isBlank()) {
+                Toast.makeText(
+                    this@FloatingOverlayService,
+                    "먼저 [🖼️ 조각캡처] 버튼을 눌러 찾을 아이콘을 캡처해 주세요.",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@launch
+            }
+
+            val rule = MacroRule(
+                name = "🖼️ 이미지 서치 터치 (${pt.first},${pt.second} 아이콘)",
+                enabled = true,
+                triggerType = TriggerType.MANUAL_FLOATING,
+                constraintType = ConstraintType.NONE,
+                actions = listOf(
+                    ActionStep(
+                        type = ActionType.CLICK_IMAGE_TEMPLATE,
+                        x = pt.first,
+                        y = pt.second,
+                        x2 = 34,
+                        durationMs = 95L,
+                        templateJson = tplJson
+                    ),
+                    ActionStep(
+                        type = ActionType.TOAST_VIBRATE,
+                        textParam = "🖼️ 화면에서 아이콘 이미지를 찾아 터치했습니다!"
+                    )
+                )
+            )
+            MacroRepository.upsertMacro(this@FloatingOverlayService, rule)
+            Toast.makeText(
+                this@FloatingOverlayService,
+                "✅ 「${rule.name}」 매크로가 생성되었습니다! 아이콘 위치가 바뀌어도 찾아서 터치합니다.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     /**

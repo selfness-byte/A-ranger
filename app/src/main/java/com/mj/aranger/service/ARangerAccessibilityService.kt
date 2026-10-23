@@ -21,6 +21,7 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.mj.aranger.engine.MacroEngine
+import com.mj.aranger.engine.VisionOcrEngine
 import com.mj.aranger.model.LogEntry
 import com.mj.aranger.model.UiNodeItem
 import com.mj.aranger.store.MacroRepository
@@ -91,7 +92,7 @@ class ARangerAccessibilityService : AccessibilityService(), SensorEventListener 
             this,
             LogEntry(
                 macroName = "접근성 서비스",
-                message = "A-ranger Pro 화면 제어 엔진(v1.3)이 연결되었습니다.",
+                message = "A-ranger Pro 화면 제어 & 비전 엔진(v1.4)이 연결되었습니다.",
                 isSuccess = true
             )
         )
@@ -349,21 +350,20 @@ class ARangerAccessibilityService : AccessibilityService(), SensorEventListener 
     }
 
     /**
-     * 🎨 화면 특정 (x, y) 좌표의 실제 픽셀 색상(#RRGGBB)을 추출합니다 (Android 11 / API 30+).
+     * 📸 현재 화면 전체를 소프트웨어 Bitmap(ARGB_8888)으로 안전하게 캡처합니다 (Android 11 / API 30+).
      */
-    suspend fun samplePixelColor(x: Int, y: Int): String? {
+    suspend fun captureScreenBitmap(): Bitmap? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
-        // 시스템은 takeScreenshot 호출 간격이 약 333ms 미만이면 거부하므로, 호출을 직렬화하고 최소 간격을 보장합니다.
         return screenshotMutex.withLock {
             val wait = MIN_SCREENSHOT_INTERVAL_MS - (SystemClock.uptimeMillis() - lastScreenshotAt)
             if (wait > 0) delay(wait)
-            val result = captureAndReadPixel(x, y)
+            val bmp = takeRawSoftwareBitmap()
             lastScreenshotAt = SystemClock.uptimeMillis()
-            result
+            bmp
         }
     }
 
-    private suspend fun captureAndReadPixel(x: Int, y: Int): String? {
+    private suspend fun takeRawSoftwareBitmap(): Bitmap? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         return suspendCancellableCoroutine { cont ->
             try {
@@ -372,28 +372,18 @@ class ARangerAccessibilityService : AccessibilityService(), SensorEventListener 
                     mainExecutor,
                     object : TakeScreenshotCallback {
                         override fun onSuccess(screenshot: ScreenshotResult) {
-                            var hex: String? = null
+                            var softBitmap: Bitmap? = null
                             try {
                                 val hwBuffer = screenshot.hardwareBuffer
                                 val hwBitmap = Bitmap.wrapHardwareBuffer(hwBuffer, screenshot.colorSpace)
                                 if (hwBitmap != null) {
-                                    val softBitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false)
-                                    val px = x.coerceIn(0, (softBitmap.width - 1).coerceAtLeast(0))
-                                    val py = y.coerceIn(0, (softBitmap.height - 1).coerceAtLeast(0))
-                                    val colorInt = softBitmap.getPixel(px, py)
-                                    hex = String.format(
-                                        "#%02X%02X%02X",
-                                        Color.red(colorInt),
-                                        Color.green(colorInt),
-                                        Color.blue(colorInt)
-                                    )
-                                    softBitmap.recycle()
+                                    softBitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false)
                                     hwBitmap.recycle()
                                 }
                                 hwBuffer.close()
                             } catch (_: Exception) {
                             }
-                            if (cont.isActive) cont.resume(hex)
+                            if (cont.isActive) cont.resume(softBitmap)
                         }
 
                         override fun onFailure(errorCode: Int) {
@@ -405,6 +395,91 @@ class ARangerAccessibilityService : AccessibilityService(), SensorEventListener 
                 if (cont.isActive) cont.resume(null)
             }
         }
+    }
+
+    /**
+     * 🎨 화면 특정 (x, y) 좌표의 실제 픽셀 색상(#RRGGBB)을 추출합니다 (Android 11 / API 30+).
+     */
+    suspend fun samplePixelColor(x: Int, y: Int): String? {
+        val softBitmap = captureScreenBitmap() ?: return null
+        return try {
+            val px = x.coerceIn(0, (softBitmap.width - 1).coerceAtLeast(0))
+            val py = y.coerceIn(0, (softBitmap.height - 1).coerceAtLeast(0))
+            val colorInt = softBitmap.getPixel(px, py)
+            String.format(
+                "#%02X%02X%02X",
+                Color.red(colorInt),
+                Color.green(colorInt),
+                Color.blue(colorInt)
+            )
+        } catch (_: Exception) {
+            null
+        } finally {
+            softBitmap.recycle()
+        }
+    }
+
+    /**
+     * 🖼️ 화면 (x, y) 좌표 주변의 아이콘·버튼 이미지를 템플릿 JSON으로 캡처합니다.
+     */
+    suspend fun captureImageTemplateAt(x: Int, y: Int, patchSize: Int = 64): String? {
+        val softBitmap = captureScreenBitmap() ?: return null
+        return try {
+            VisionOcrEngine.captureTemplateFromBitmap(softBitmap, x, y, patchSize)
+        } finally {
+            softBitmap.recycle()
+        }
+    }
+
+    /**
+     * 🖼️ 캡처된 이미지 템플릿과 일치하는 아이콘·버튼을 현재 화면 전체에서 탐색합니다.
+     */
+    suspend fun findImageTemplateCoordinates(
+        templateJson: String,
+        tolerance: Int = 34
+    ): VisionOcrEngine.TemplateMatchResult? {
+        if (templateJson.isBlank()) return null
+        val softBitmap = captureScreenBitmap() ?: return null
+        return try {
+            VisionOcrEngine.findTemplateOnScreen(softBitmap, templateJson, tolerance)
+        } finally {
+            softBitmap.recycle()
+        }
+    }
+
+    /**
+     * 👁️ 하이브리드 온디바이스 비전 OCR 텍스트 탐색:
+     * 1차: 모든 윈도우 노드(클릭 불가 텍스트뷰/웹뷰/툴팁 포함)에서 화면 좌표(Rect) 추출
+     * 2차: 접근성 트리에 없는 캔버스/게임/이미지 텍스트는 실제 화면 Bitmap 글리프 대비 매칭으로 좌표 추출
+     */
+    suspend fun findTextCoordinatesByHybridOcr(targetText: String): Pair<Int, Int>? {
+        val query = targetText.trim()
+        if (query.isEmpty()) return null
+
+        // 1차: 접근성 노드 트리에서 좌표(Bounds) 직접 탐색
+        for (root in getTargetRoots()) {
+            val matched = findMatchingNode(root, query, 0)
+            if (matched != null) {
+                val rect = Rect()
+                matched.getBoundsInScreen(rect)
+                if (!rect.isEmpty && rect.centerX() > 0 && rect.centerY() > 0) {
+                    return Pair(rect.centerX(), rect.centerY())
+                }
+            }
+        }
+
+        // 2차: 화면 캡처 Bitmap 기반 온디바이스 비전 글리프 OCR 스캔
+        val softBitmap = captureScreenBitmap() ?: return null
+        return try {
+            VisionOcrEngine.findTextByVisualOcr(softBitmap, query)
+        } finally {
+            softBitmap.recycle()
+        }
+    }
+
+    suspend fun clickTextByHybridOcr(targetText: String, durationMs: Long = 95L): Boolean {
+        val pt = findTextCoordinatesByHybridOcr(targetText) ?: return false
+        return performTap(pt.first, pt.second, durationMs)
     }
 
     private fun humanizeCoord(coord: Int): Int {

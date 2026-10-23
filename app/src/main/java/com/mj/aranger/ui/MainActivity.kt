@@ -138,7 +138,7 @@ class MainActivity : AppCompatActivity() {
             setTypeface(typeface, Typeface.BOLD)
         }
         val subTv = TextView(this).apply {
-            text = "v$curName · 픽셀 스포이드 · 궤적녹화 · 안티감지 · 자가복구"
+            text = "v$curName · 이미지서치 · 비전OCR · 무한루프/분기 · 스포이드 · 자가복구"
             setTextColor(Color.parseColor("#94A3B8"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
         }
@@ -263,11 +263,13 @@ class MainActivity : AppCompatActivity() {
         val pickedColor = MacroRepository.getPickedColorHex(this)
         val pickedNode = MacroRepository.getPickedNodeInfo(this)
         val hasPath = MacroRepository.getLastRecordedPathJson(this).isNotBlank()
+        val hasTemplate = MacroRepository.getLastCapturedTemplateJson(this).isNotBlank()
         val extraInfo = buildString {
             append("🎯 최근 타겟: (${picked.first}, ${picked.second}) · 🎨 색상: $pickedColor")
             if (pickedNode.first.isNotBlank()) append(" · 글자: 「${pickedNode.first}」")
             if (pickedNode.second.isNotBlank()) append(" · ID: ${pickedNode.second.substringAfterLast('/')}")
             if (hasPath) append(" · 📹 궤적녹화됨")
+            if (hasTemplate) append(" · 🖼️ 조각캡처됨")
         }
         val pickedInfo = TextView(this).apply {
             text = extraInfo
@@ -920,7 +922,7 @@ class MainActivity : AppCompatActivity() {
         card.addView(triggerTv)
 
         val constraintTv = TextView(this).apply {
-            text = "${rule.constraintSummary()}  ·  실행 ${rule.runCount}회"
+            text = "${rule.constraintSummary()}  ·  ${rule.repeatSummary()}  ·  실행 ${rule.runCount}회"
             setTextColor(Color.parseColor("#94A3B8"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setPadding(0, 0, 0, dp(8))

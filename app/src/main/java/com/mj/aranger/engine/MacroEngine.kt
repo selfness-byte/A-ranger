@@ -14,6 +14,7 @@ import android.os.VibratorManager
 import android.widget.Toast
 import com.mj.aranger.model.ActionStep
 import com.mj.aranger.model.ActionType
+import com.mj.aranger.model.BranchBehavior
 import com.mj.aranger.model.ConstraintType
 import com.mj.aranger.model.GlobalActionOption
 import com.mj.aranger.model.LogEntry
@@ -254,6 +255,13 @@ object MacroEngine {
         }
     }
 
+    private enum class StepOutcome {
+        SUCCESS,
+        FAILED,
+        SKIP_NEXT,
+        ABORT_MACRO
+    }
+
     private fun evaluateAndRun(
         context: Context,
         rule: MacroRule,
@@ -278,28 +286,78 @@ object MacroEngine {
 
         val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             try {
+                val isInfinite = rule.repeatCount == 0
+                val totalCycles = if (isInfinite) Int.MAX_VALUE else rule.repeatCount.coerceIn(1, 9999)
+                val loopTag = when {
+                    isInfinite -> "♾️ 무한 반복"
+                    totalCycles > 1 -> "🔁 ${totalCycles}회 반복"
+                    else -> "1회 실행"
+                }
+
                 MacroRepository.addLog(
                     context,
                     LogEntry(
                         macroName = rule.name,
-                        message = "발동됨 [$triggerReason] → 액션 ${rule.actions.size}개 시작",
+                        message = "발동됨 [$triggerReason] → 액션 ${rule.actions.size}개 시작 ($loopTag)",
                         isSuccess = true
                     )
                 )
-                for ((idx, step) in rule.actions.withIndex()) {
-                    if (!isActive) break
-                    val ok = executeActionStep(context, step)
-                    if (!ok) {
-                        MacroRepository.addLog(
-                            context,
-                            LogEntry(
-                                macroName = rule.name,
-                                message = "단계 ${idx + 1} 미수행: ${step.toSummary()}",
-                                isSuccess = false
-                            )
-                        )
+
+                var cycle = 1
+                outerLoop@ while (cycle <= totalCycles && isActive) {
+                    if (cycle > 1 && !MacroRepository.isMasterEnabled(context)) {
+                        break@outerLoop
                     }
-                    delay(humanizeInterval(context, 120L))
+                    var idx = 0
+                    while (idx < rule.actions.size && isActive) {
+                        val step = rule.actions[idx]
+                        when (executeActionStep(context, rule.name, step)) {
+                            StepOutcome.SUCCESS -> {
+                                idx++
+                            }
+                            StepOutcome.FAILED -> {
+                                MacroRepository.addLog(
+                                    context,
+                                    LogEntry(
+                                        macroName = rule.name,
+                                        message = "단계 ${idx + 1} 미수행: ${step.toSummary()}",
+                                        isSuccess = false
+                                    )
+                                )
+                                idx++
+                            }
+                            StepOutcome.SKIP_NEXT -> {
+                                MacroRepository.addLog(
+                                    context,
+                                    LogEntry(
+                                        macroName = rule.name,
+                                        message = "⏭️ 조건 분기(${idx + 1}번) → 다음 단계(${idx + 2}번) 건너뜀",
+                                        isSuccess = true
+                                    )
+                                )
+                                idx += 2
+                            }
+                            StepOutcome.ABORT_MACRO -> {
+                                MacroRepository.addLog(
+                                    context,
+                                    LogEntry(
+                                        macroName = rule.name,
+                                        message = "🛑 조건 분기(${idx + 1}번)에 의해 매크로가 종료되었습니다.",
+                                        isSuccess = true
+                                    )
+                                )
+                                break@outerLoop
+                            }
+                        }
+                        if (idx < rule.actions.size && isActive) {
+                            delay(humanizeInterval(context, 120L))
+                        }
+                    }
+
+                    if (cycle < totalCycles && isActive) {
+                        delay(humanizeInterval(context, rule.repeatDelayMs.coerceAtLeast(100L)))
+                    }
+                    cycle++
                 }
             } catch (_: CancellationException) {
             } catch (e: Exception) {
@@ -372,10 +430,33 @@ object MacroEngine {
         return (h.coerceIn(0, 23) * 60) + m.coerceIn(0, 59)
     }
 
-    private suspend fun executeActionStep(context: Context, step: ActionStep): Boolean {
+    private fun resolveBranchOutcome(conditionMatched: Boolean, behavior: BranchBehavior): StepOutcome {
+        return when (behavior) {
+            BranchBehavior.CONTINUE_IF_MATCH -> {
+                if (conditionMatched) StepOutcome.SUCCESS else StepOutcome.ABORT_MACRO
+            }
+            BranchBehavior.ABORT_IF_MATCH -> {
+                if (conditionMatched) StepOutcome.ABORT_MACRO else StepOutcome.SUCCESS
+            }
+            BranchBehavior.SKIP_NEXT_IF_NOT_MATCH -> {
+                if (conditionMatched) StepOutcome.SUCCESS else StepOutcome.SKIP_NEXT
+            }
+            BranchBehavior.SKIP_NEXT_IF_MATCH -> {
+                if (conditionMatched) StepOutcome.SKIP_NEXT else StepOutcome.SUCCESS
+            }
+        }
+    }
+
+    private suspend fun executeActionStep(
+        context: Context,
+        macroName: String,
+        step: ActionStep
+    ): StepOutcome {
+        fun Boolean.toOutcome(): StepOutcome = if (this) StepOutcome.SUCCESS else StepOutcome.FAILED
+
         return when (step.type) {
             ActionType.TAP_XY -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
                 var allOk = true
                 val count = step.repeatCount.coerceIn(1, 500)
                 for (i in 0 until count) {
@@ -385,36 +466,134 @@ object MacroEngine {
                         delay(humanizeInterval(context, step.repeatIntervalMs.coerceAtLeast(40L)))
                     }
                 }
-                allOk
+                allOk.toOutcome()
             }
             ActionType.LONG_PRESS_XY -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
-                svc.performTap(step.x, step.y, step.durationMs.coerceAtLeast(600L))
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                svc.performTap(step.x, step.y, step.durationMs.coerceAtLeast(600L)).toOutcome()
             }
             ActionType.TAP_IF_COLOR -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
-                val currentHex = svc.samplePixelColor(step.x, step.y) ?: return false
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                val currentHex = svc.samplePixelColor(step.x, step.y) ?: return StepOutcome.FAILED
                 if (ARangerAccessibilityService.colorsMatch(currentHex, step.colorHex)) {
-                    svc.performTap(step.x, step.y, step.durationMs)
+                    svc.performTap(step.x, step.y, step.durationMs).toOutcome()
                 } else {
-                    false
+                    StepOutcome.FAILED
                 }
             }
             ActionType.LOOP_UNTIL_COLOR -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
                 val maxTries = step.repeatCount.coerceIn(1, 500)
                 val interval = step.repeatIntervalMs.coerceAtLeast(350L)
                 for (i in 0 until maxTries) {
                     val sampled = svc.samplePixelColor(step.x, step.y)
                     if (sampled != null && ARangerAccessibilityService.colorsMatch(sampled, step.colorHex)) {
-                        return svc.performTap(step.x, step.y, step.durationMs)
+                        return svc.performTap(step.x, step.y, step.durationMs).toOutcome()
                     }
                     delay(humanizeInterval(context, interval))
                 }
-                false
+                StepOutcome.FAILED
+            }
+            ActionType.CLICK_IMAGE_TEMPLATE -> {
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                val tpl = step.templateJson.ifBlank { MacroRepository.getLastCapturedTemplateJson(context) }
+                val tolerance = step.x2.takeIf { it in 10..80 } ?: 34
+                val match = svc.findImageTemplateCoordinates(tpl, tolerance) ?: return StepOutcome.FAILED
+                val tapped = svc.performTap(match.x, match.y, step.durationMs)
+                if (tapped) {
+                    MacroRepository.addLog(
+                        context,
+                        LogEntry(
+                            macroName = macroName,
+                            message = "🖼️ 이미지 매칭 성공 (${match.x}, ${match.y} · 일치도 ${match.similarityPercent}%) → 터치 완료",
+                            isSuccess = true
+                        )
+                    )
+                }
+                tapped.toOutcome()
+            }
+            ActionType.LOOP_UNTIL_IMAGE -> {
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                val tpl = step.templateJson.ifBlank { MacroRepository.getLastCapturedTemplateJson(context) }
+                val tolerance = step.x2.takeIf { it in 10..80 } ?: 34
+                val maxTries = step.repeatCount.coerceIn(1, 500)
+                val interval = step.repeatIntervalMs.coerceAtLeast(350L)
+                for (i in 0 until maxTries) {
+                    val match = svc.findImageTemplateCoordinates(tpl, tolerance)
+                    if (match != null) {
+                        val tapped = svc.performTap(match.x, match.y, step.durationMs)
+                        if (tapped) {
+                            MacroRepository.addLog(
+                                context,
+                                LogEntry(
+                                    macroName = macroName,
+                                    message = "🖼️ 대기 중 이미지 발견 (${match.x}, ${match.y} · 일치도 ${match.similarityPercent}%) → 터치 완료",
+                                    isSuccess = true
+                                )
+                            )
+                        }
+                        return tapped.toOutcome()
+                    }
+                    delay(humanizeInterval(context, interval))
+                }
+                StepOutcome.FAILED
+            }
+            ActionType.OCR_CLICK_TEXT -> {
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                val pt = svc.findTextCoordinatesByHybridOcr(step.textParam) ?: return StepOutcome.FAILED
+                val tapped = svc.performTap(pt.first, pt.second, step.durationMs)
+                if (tapped) {
+                    MacroRepository.addLog(
+                        context,
+                        LogEntry(
+                            macroName = macroName,
+                            message = "👁️ 비전 OCR 「${step.textParam}」 인식 (${pt.first}, ${pt.second}) → 터치 완료",
+                            isSuccess = true
+                        )
+                    )
+                }
+                tapped.toOutcome()
+            }
+            ActionType.OCR_LOOP_UNTIL_TEXT -> {
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                val targetText = step.textParam.trim()
+                val maxTries = step.repeatCount.coerceIn(1, 500)
+                val interval = step.repeatIntervalMs.coerceAtLeast(350L)
+                for (i in 0 until maxTries) {
+                    val foundPt = svc.findTextCoordinatesByHybridOcr(targetText)
+                    if (foundPt != null) {
+                        MacroRepository.addLog(
+                            context,
+                            LogEntry(
+                                macroName = macroName,
+                                message = "👁️ 비전 OCR 대기 완료: 「$targetText」 발견 (${foundPt.first}, ${foundPt.second})",
+                                isSuccess = true
+                            )
+                        )
+                        return StepOutcome.SUCCESS
+                    }
+                    svc.performTap(step.x, step.y, step.durationMs)
+                    delay(humanizeInterval(context, interval))
+                }
+                (svc.findTextCoordinatesByHybridOcr(targetText) != null).toOutcome()
+            }
+            ActionType.BRANCH_IF_TEXT -> {
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                val matched = svc.containsScreenText(step.textParam) ||
+                    (svc.findTextCoordinatesByHybridOcr(step.textParam) != null)
+                val behavior = BranchBehavior.fromCode(step.x)
+                resolveBranchOutcome(matched, behavior)
+            }
+            ActionType.BRANCH_IF_COLOR -> {
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                val currentHex = svc.samplePixelColor(step.x, step.y)
+                val matched = currentHex != null &&
+                    ARangerAccessibilityService.colorsMatch(currentHex, step.colorHex)
+                val behavior = BranchBehavior.fromCode(step.x2)
+                resolveBranchOutcome(matched, behavior)
             }
             ActionType.CUSTOM_GESTURE_PATH -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
                 val pathData = step.gesturePathJson.ifBlank {
                     MacroRepository.getLastRecordedPathJson(context)
                 }
@@ -427,32 +606,32 @@ object MacroEngine {
                         delay(humanizeInterval(context, step.repeatIntervalMs.coerceAtLeast(200L)))
                     }
                 }
-                allOk
+                allOk.toOutcome()
             }
             ActionType.CLICK_TEXT -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
-                svc.clickNodeByText(step.textParam)
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                svc.clickNodeByText(step.textParam).toOutcome()
             }
             ActionType.CLICK_VIEW_ID -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
-                svc.clickNodeByViewId(step.textParam)
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                svc.clickNodeByViewId(step.textParam).toOutcome()
             }
             ActionType.LOOP_UNTIL_TEXT -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
                 val targetText = step.textParam.trim()
                 val maxTries = step.repeatCount.coerceIn(1, 500)
                 val interval = step.repeatIntervalMs.coerceAtLeast(150L)
                 for (i in 0 until maxTries) {
                     if (targetText.isNotEmpty() && svc.containsScreenText(targetText)) {
-                        return true
+                        return StepOutcome.SUCCESS
                     }
                     svc.performTap(step.x, step.y, step.durationMs)
                     delay(humanizeInterval(context, interval))
                 }
-                targetText.isEmpty() || svc.containsScreenText(targetText)
+                (targetText.isEmpty() || svc.containsScreenText(targetText)).toOutcome()
             }
             ActionType.SWIPE -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
                 val count = step.repeatCount.coerceIn(1, 200)
                 var allOk = true
                 for (i in 0 until count) {
@@ -462,42 +641,42 @@ object MacroEngine {
                         delay(humanizeInterval(context, step.repeatIntervalMs.coerceAtLeast(150L)))
                     }
                 }
-                allOk
+                allOk.toOutcome()
             }
             ActionType.INPUT_TEXT -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
                 val expanded = expandTemplateVars(step.textParam)
-                svc.inputText(expanded)
+                svc.inputText(expanded).toOutcome()
             }
             ActionType.CLIPBOARD_PASTE -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
                 val expanded = expandTemplateVars(step.textParam)
-                svc.pasteTextViaClipboard(expanded)
+                svc.pasteTextViaClipboard(expanded).toOutcome()
             }
             ActionType.WEBHOOK_HTTP -> {
-                sendWebhookRequest(context, step.textParam)
+                sendWebhookRequest(context, step.textParam).toOutcome()
             }
             ActionType.WAIT -> {
                 delay(step.durationMs.coerceIn(50L, 300_000L))
-                true
+                StepOutcome.SUCCESS
             }
             ActionType.GLOBAL_ACTION -> {
-                val svc = ARangerAccessibilityService.instance ?: return false
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
                 val option = GlobalActionOption.fromName(step.globalActionName)
-                svc.performGlobalAction(option.serviceAction)
+                svc.performGlobalAction(option.serviceAction).toOutcome()
             }
             ActionType.MEDIA_VOLUME -> {
                 setMediaVolumePercent(context, step.x.coerceIn(0, 100))
-                true
+                StepOutcome.SUCCESS
             }
             ActionType.LAUNCH_APP -> {
-                launchAppByKeyword(context, step.textParam)
+                launchAppByKeyword(context, step.textParam).toOutcome()
             }
             ActionType.TOAST_VIBRATE -> {
                 val msg = expandTemplateVars(step.textParam.ifBlank { "A-ranger 매크로 실행됨" })
                 showToast(context, msg)
                 vibrateShort(context)
-                true
+                StepOutcome.SUCCESS
             }
         }
     }

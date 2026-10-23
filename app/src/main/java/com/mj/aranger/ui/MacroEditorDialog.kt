@@ -13,18 +13,22 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import com.mj.aranger.engine.VisionOcrEngine
 import com.mj.aranger.model.ActionStep
 import com.mj.aranger.model.ActionType
+import com.mj.aranger.model.BranchBehavior
 import com.mj.aranger.model.ConstraintType
 import com.mj.aranger.model.GlobalActionOption
 import com.mj.aranger.model.MacroRule
 import com.mj.aranger.model.TriggerType
 import com.mj.aranger.store.MacroRepository
+import java.util.UUID
 
 object MacroEditorDialog {
 
@@ -48,7 +52,7 @@ object MacroEditorDialog {
 
         // 1. 매크로 이름
         container.addView(sectionLabel(context, "📌 매크로 이름"))
-        val nameInput = styledEditText(context, "예: 광고 건너뛰기 / 색상 감지 터치").apply {
+        val nameInput = styledEditText(context, "예: 광고 건너뛰기 / 이미지 서치 터치").apply {
             setText(initialRule?.name ?: "")
         }
         container.addView(nameInput)
@@ -132,7 +136,7 @@ object MacroEditorDialog {
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
 
-        // 재발동 대기시간(쿨다운)
+        // 4. 재발동 대기시간(쿨다운) 및 매크로 전체 반복(Loop) 설정
         container.addView(sectionLabel(context, "⏱️ 재발동 쿨다운 (밀리초, 연속 중복 실행 방지)"))
         val cooldownInput = styledEditText(
             context,
@@ -143,8 +147,49 @@ object MacroEditorDialog {
         }
         container.addView(cooldownInput)
 
-        // 4. 액션(Actions) 단계 목록
-        container.addView(sectionLabel(context, "🚀 실행할 액션 목록 (순서대로 실행됩니다)"))
+        container.addView(sectionLabel(context, "🔁 매크로 전체 반복 횟수 (0 입력 시 무한 반복, 기본 1회)"))
+        val macroRepeatInput = styledEditText(
+            context,
+            "0 = 무한 반복 / 1 = 1회 실행 / N = N회 반복",
+            InputType.TYPE_CLASS_NUMBER
+        ).apply {
+            setText((initialRule?.repeatCount ?: 1).toString())
+        }
+        val macroRepeatDelayInput = styledEditText(
+            context,
+            "전체 사이클 간 대기 시간 ms (기본 500)",
+            InputType.TYPE_CLASS_NUMBER
+        ).apply {
+            setText((initialRule?.repeatDelayMs ?: 500L).toString())
+        }
+
+        val loopPresetRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dp(context, 6)
+            }
+        }
+        loopPresetRow.addView(smallActionButton(context, "1회 실행", "#334155") {
+            macroRepeatInput.setText("1")
+        })
+        loopPresetRow.addView(smallActionButton(context, "10회 반복", "#0284C7") {
+            macroRepeatInput.setText("10")
+        })
+        loopPresetRow.addView(smallActionButton(context, "100회 반복", "#7C3AED") {
+            macroRepeatInput.setText("100")
+        })
+        loopPresetRow.addView(smallActionButton(context, "♾️ 무한 반복(0)", "#E11D48") {
+            macroRepeatInput.setText("0")
+        })
+        container.addView(loopPresetRow)
+        container.addView(macroRepeatInput)
+        container.addView(macroRepeatDelayInput)
+
+        // 5. 액션(Actions) 단계 목록 (클릭 시 수정 / 복제 / 순서 이동 지원)
+        container.addView(sectionLabel(context, "🚀 실행할 액션 목록 (터치하여 수정 · 복제 · 순서 변경)"))
         val actionsContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
         }
@@ -154,7 +199,7 @@ object MacroEditorDialog {
             actionsContainer.removeAllViews()
             if (workingActions.isEmpty()) {
                 val emptyTv = TextView(context).apply {
-                    text = "아직 등록된 액션이 없습니다. 아래 [+ 액션 추가] 버튼을 눌러 화면 터치, 픽셀 색상 조건, 궤적 재생, 웹훅 등을 추가하세요."
+                    text = "아직 등록된 액션이 없습니다. 아래 [+ 액션 추가] 버튼을 눌러 화면 터치, 이미지 서치, 비전 OCR, 조건 분기 등을 추가하세요."
                     setTextColor(Color.parseColor("#94A3B8"))
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
                     setPadding(dp(context, 8), dp(context, 10), dp(context, 8), dp(context, 10))
@@ -164,9 +209,8 @@ object MacroEditorDialog {
             }
 
             workingActions.forEachIndexed { idx, step ->
-                val row = LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
+                val card = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
                     setPadding(dp(context, 12), dp(context, 10), dp(context, 10), dp(context, 10))
                     background = GradientDrawable().apply {
                         shape = GradientDrawable.RECTANGLE
@@ -186,34 +230,65 @@ object MacroEditorDialog {
                     text = "${idx + 1}. ${step.toSummary()}"
                     setTextColor(Color.parseColor("#F8FAFC"))
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    setPadding(0, 0, 0, dp(context, 6))
+                    setOnClickListener {
+                        showActionStepBuilder(context, initialStep = step) { updated ->
+                            workingActions[idx] = updated
+                            renderActions()
+                        }
+                    }
                 }
-                row.addView(summaryTv)
+                card.addView(summaryTv)
+
+                val btnRow = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                }
+
+                btnRow.addView(smallActionButton(context, "✏️ 수정", "#0284C7") {
+                    showActionStepBuilder(context, initialStep = step) { updated ->
+                        workingActions[idx] = updated
+                        renderActions()
+                    }
+                })
+
+                btnRow.addView(smallActionButton(context, "📋 복제", "#0D9488") {
+                    workingActions.add(idx + 1, step.copy(id = UUID.randomUUID().toString()))
+                    renderActions()
+                })
 
                 if (idx > 0) {
-                    val upBtn = smallActionButton(context, "▲", "#334155") {
+                    btnRow.addView(smallActionButton(context, "▲", "#334155") {
                         val tmp = workingActions[idx - 1]
                         workingActions[idx - 1] = workingActions[idx]
                         workingActions[idx] = tmp
                         renderActions()
-                    }
-                    row.addView(upBtn)
+                    })
                 }
 
-                val delBtn = smallActionButton(context, "삭제", "#B91C1C") {
+                if (idx < workingActions.size - 1) {
+                    btnRow.addView(smallActionButton(context, "▼", "#334155") {
+                        val tmp = workingActions[idx + 1]
+                        workingActions[idx + 1] = workingActions[idx]
+                        workingActions[idx] = tmp
+                        renderActions()
+                    })
+                }
+
+                btnRow.addView(smallActionButton(context, "삭제", "#B91C1C") {
                     workingActions.removeAt(idx)
                     renderActions()
-                }
-                row.addView(delBtn)
+                })
 
-                actionsContainer.addView(row)
+                card.addView(btnRow)
+                actionsContainer.addView(card)
             }
         }
 
         renderActions()
 
         val addActionBtn = TextView(context).apply {
-            text = "+ 화면 제어 / 자동화 액션 추가"
+            text = "+ 화면 제어 / 비전 / 조건분기 액션 추가"
             gravity = Gravity.CENTER
             setTextColor(Color.parseColor("#0F172A"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
@@ -231,7 +306,7 @@ object MacroEditorDialog {
                 topMargin = dp(context, 6)
             }
             setOnClickListener {
-                showActionStepBuilder(context) { newStep ->
+                showActionStepBuilder(context, initialStep = null) { newStep ->
                     workingActions.add(newStep)
                     renderActions()
                 }
@@ -256,6 +331,8 @@ object MacroEditorDialog {
                 val selectedTrigger = triggerTypes[triggerSpinner.selectedItemPosition]
                 val selectedConstraint = constraintTypes[constraintSpinner.selectedItemPosition]
                 val cooldown = cooldownInput.text.toString().trim().toLongOrNull()?.coerceAtLeast(200L) ?: 1500L
+                val macroRepeat = (macroRepeatInput.text.toString().trim().toIntOrNull() ?: 1).coerceIn(0, 9999)
+                val macroRepeatDelay = (macroRepeatDelayInput.text.toString().trim().toLongOrNull() ?: 500L).coerceAtLeast(100L)
 
                 val savedRule = (initialRule ?: MacroRule(name = name)).copy(
                     name = name,
@@ -264,6 +341,8 @@ object MacroEditorDialog {
                     constraintType = selectedConstraint,
                     constraintParam = constraintParamInput.text.toString().trim(),
                     cooldownMs = cooldown,
+                    repeatCount = macroRepeat,
+                    repeatDelayMs = macroRepeatDelay,
                     actions = workingActions.toList()
                 )
                 onSaved(savedRule)
@@ -274,7 +353,12 @@ object MacroEditorDialog {
         dialog.show()
     }
 
-    private fun showActionStepBuilder(context: Context, onAdded: (ActionStep) -> Unit) {
+    private fun showActionStepBuilder(
+        context: Context,
+        initialStep: ActionStep? = null,
+        onSaved: (ActionStep) -> Unit
+    ) {
+        val isEditingStep = initialStep != null
         val scroll = ScrollView(context).apply {
             setBackgroundColor(Color.parseColor("#0F172A"))
         }
@@ -287,6 +371,8 @@ object MacroEditorDialog {
         box.addView(sectionLabel(context, "액션 종류 선택"))
         val actionTypes = ActionType.entries
         val typeSpinner = styledSpinner(context, actionTypes.map { it.title })
+        val initialTypeIdx = initialStep?.let { actionTypes.indexOf(it.type) }?.coerceAtLeast(0) ?: 0
+        typeSpinner.setSelection(initialTypeIdx)
         box.addView(typeSpinner)
 
         val dynamicFields = LinearLayout(context).apply {
@@ -298,34 +384,51 @@ object MacroEditorDialog {
         val pickedNode = MacroRepository.getPickedNodeInfo(context)
         val pickedColor = MacroRepository.getPickedColorHex(context)
 
+        var activeTemplateJson = initialStep?.templateJson?.takeIf { it.isNotBlank() }
+            ?: MacroRepository.getLastCapturedTemplateJson(context)
+
         val xInput = styledEditText(context, "X 좌표 (예: 540)", InputType.TYPE_CLASS_NUMBER).apply {
-            setText(picked.first.toString())
+            setText((initialStep?.x ?: picked.first).toString())
         }
         val yInput = styledEditText(context, "Y 좌표 (예: 1200)", InputType.TYPE_CLASS_NUMBER).apply {
-            setText(picked.second.toString())
+            setText((initialStep?.y ?: picked.second).toString())
         }
-        val x2Input = styledEditText(context, "끝 X2 좌표 (예: 540)", InputType.TYPE_CLASS_NUMBER).apply {
-            setText("540")
+        val x2Input = styledEditText(context, "끝 X2 좌표 / 허용 오차 (예: 540 또는 34)", InputType.TYPE_CLASS_NUMBER).apply {
+            setText((initialStep?.x2 ?: 540).toString())
         }
         val y2Input = styledEditText(context, "끝 Y2 좌표 (예: 450)", InputType.TYPE_CLASS_NUMBER).apply {
-            setText("450")
+            setText((initialStep?.y2 ?: 450).toString())
         }
         val colorHexInput = styledEditText(context, "비교할 색상 #RRGGBB (예: #38BDF8)").apply {
-            setText(pickedColor)
+            setText(initialStep?.colorHex ?: pickedColor)
         }
         val durationInput = styledEditText(context, "지속/대기 시간 ms (예: 100)", InputType.TYPE_CLASS_NUMBER).apply {
-            setText("100")
+            setText((initialStep?.durationMs ?: 100L).toString())
         }
         val repeatCountInput = styledEditText(context, "반복 횟수 (기본 1)", InputType.TYPE_CLASS_NUMBER).apply {
-            setText("1")
+            setText((initialStep?.repeatCount ?: 1).toString())
         }
         val repeatIntervalInput = styledEditText(context, "반복 간격 ms (기본 250)", InputType.TYPE_CLASS_NUMBER).apply {
-            setText("250")
+            setText((initialStep?.repeatIntervalMs ?: 250L).toString())
         }
-        val textParamInput = styledEditText(context, "찾을 글자 / 뷰 ID / 텍스트 / URL 입력")
+        val textParamInput = styledEditText(context, "찾을 글자 / 뷰 ID / 텍스트 / URL 입력").apply {
+            setText(initialStep?.textParam ?: "")
+        }
 
         val globalOptions = GlobalActionOption.entries
         val globalSpinner = styledSpinner(context, globalOptions.map { it.label })
+        if (initialStep != null) {
+            val gIdx = globalOptions.indexOfFirst { it.name == initialStep.globalActionName }.coerceAtLeast(0)
+            globalSpinner.setSelection(gIdx)
+        }
+
+        val branchOptions = BranchBehavior.entries
+        val branchSpinner = styledSpinner(context, branchOptions.map { it.label })
+        if (initialStep != null) {
+            val code = if (initialStep.type == ActionType.BRANCH_IF_COLOR) initialStep.x2 else initialStep.x
+            val bIdx = branchOptions.indexOfFirst { it.code == code }.coerceAtLeast(0)
+            branchSpinner.setSelection(bIdx)
+        }
 
         fun buildLoadCoordButton(): View = TextView(context).apply {
             val pt = MacroRepository.getPickedPoint(context)
@@ -355,8 +458,76 @@ object MacroEditorDialog {
             }
         }
 
+        fun buildImageTemplatePreviewBox(): View {
+            val wrap = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10))
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(context, 10).toFloat()
+                    setColor(Color.parseColor("#1E293B"))
+                    setStroke(dp(context, 1), Color.parseColor("#38BDF8"))
+                }
+            }
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val previewImg = ImageView(context).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(context, 52), dp(context, 52)).apply {
+                    marginEnd = dp(context, 12)
+                }
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(context, 6).toFloat()
+                    setColor(Color.parseColor("#0F172A"))
+                    setStroke(dp(context, 1), Color.parseColor("#475569"))
+                }
+            }
+            val descTv = TextView(context).apply {
+                setTextColor(Color.parseColor("#E2E8F0"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            fun refreshPreview() {
+                val bmp = VisionOcrEngine.decodeThumbnailBitmap(activeTemplateJson)
+                if (bmp != null) {
+                    previewImg.setImageBitmap(bmp)
+                    descTv.text = "✅ 캡처된 아이콘 템플릿:\n${VisionOcrEngine.getTemplateSummary(activeTemplateJson)}"
+                } else {
+                    previewImg.setImageDrawable(null)
+                    descTv.text = "⚠️ 아직 캡처된 아이콘 조각이 없습니다.\n플로팅 리모컨 [🎯 조준] → [🖼️ 조각캡처]를 눌러 원하는 아이콘을 캡처하세요."
+                }
+            }
+            refreshPreview()
+
+            row.addView(previewImg)
+            row.addView(descTv)
+            wrap.addView(row)
+
+            val reloadBtn = TextView(context).apply {
+                text = "🔄 최근 리모컨으로 캡처한 아이콘 조각 다시 불러오기"
+                setTextColor(Color.parseColor("#38BDF8"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, dp(context, 8), 0, 0)
+                setOnClickListener {
+                    activeTemplateJson = MacroRepository.getLastCapturedTemplateJson(context)
+                    refreshPreview()
+                }
+            }
+            wrap.addView(reloadBtn)
+            return wrap
+        }
+
+        var firstRender = true
         fun rebuildFields(selected: ActionType) {
             dynamicFields.removeAllViews()
+            val preserveValues = isEditingStep && firstRender
+            firstRender = false
+
             when (selected) {
                 ActionType.TAP_XY -> {
                     dynamicFields.addView(buildLoadCoordButton())
@@ -367,7 +538,7 @@ object MacroEditorDialog {
                     dynamicFields.addView(repeatCountInput)
                     dynamicFields.addView(repeatIntervalInput)
                     dynamicFields.addView(sectionLabel(context, "터치 유지 시간(ms)"))
-                    durationInput.setText("90")
+                    if (!preserveValues) durationInput.setText("90")
                     dynamicFields.addView(durationInput)
                 }
                 ActionType.LONG_PRESS_XY -> {
@@ -376,7 +547,7 @@ object MacroEditorDialog {
                     dynamicFields.addView(xInput)
                     dynamicFields.addView(yInput)
                     dynamicFields.addView(sectionLabel(context, "길게 누를 시간(ms, 기본 800ms)"))
-                    durationInput.setText("800")
+                    if (!preserveValues) durationInput.setText("800")
                     dynamicFields.addView(durationInput)
                 }
                 ActionType.TAP_IF_COLOR -> {
@@ -387,7 +558,7 @@ object MacroEditorDialog {
                     dynamicFields.addView(sectionLabel(context, "일치해야 하는 픽셀 색상 (#RRGGBB)"))
                     dynamicFields.addView(colorHexInput)
                     dynamicFields.addView(sectionLabel(context, "터치 유지 시간(ms)"))
-                    durationInput.setText("95")
+                    if (!preserveValues) durationInput.setText("95")
                     dynamicFields.addView(durationInput)
                 }
                 ActionType.LOOP_UNTIL_COLOR -> {
@@ -398,10 +569,75 @@ object MacroEditorDialog {
                     dynamicFields.addView(sectionLabel(context, "기다릴 목표 픽셀 색상 (#RRGGBB)"))
                     dynamicFields.addView(colorHexInput)
                     dynamicFields.addView(sectionLabel(context, "최대 검사 횟수 및 검사 간격(ms)"))
-                    repeatCountInput.setText("25")
-                    repeatIntervalInput.setText("400")
+                    if (!preserveValues) {
+                        repeatCountInput.setText("25")
+                        repeatIntervalInput.setText("400")
+                    }
                     dynamicFields.addView(repeatCountInput)
                     dynamicFields.addView(repeatIntervalInput)
+                }
+                ActionType.CLICK_IMAGE_TEMPLATE -> {
+                    dynamicFields.addView(buildImageTemplatePreviewBox())
+                    dynamicFields.addView(sectionLabel(context, "색상 허용 오차 (15~60, 기본 34) 및 터치 유지 시간(ms)"))
+                    if (!preserveValues) {
+                        x2Input.setText("34")
+                        durationInput.setText("95")
+                    }
+                    dynamicFields.addView(x2Input)
+                    dynamicFields.addView(durationInput)
+                }
+                ActionType.LOOP_UNTIL_IMAGE -> {
+                    dynamicFields.addView(buildImageTemplatePreviewBox())
+                    dynamicFields.addView(sectionLabel(context, "최대 탐색 횟수 및 탐색 간격(ms)"))
+                    if (!preserveValues) {
+                        repeatCountInput.setText("25")
+                        repeatIntervalInput.setText("450")
+                        x2Input.setText("34")
+                    }
+                    dynamicFields.addView(repeatCountInput)
+                    dynamicFields.addView(repeatIntervalInput)
+                    dynamicFields.addView(sectionLabel(context, "색상 허용 오차 (15~60, 기본 34)"))
+                    dynamicFields.addView(x2Input)
+                }
+                ActionType.OCR_CLICK_TEXT -> {
+                    dynamicFields.addView(sectionLabel(context, "👁️ 화면에서 비전 OCR로 찾아 터치할 글자 (캔버스/게임/일반 화면 모두 지원)"))
+                    textParamInput.hint = "예: 건너뛰기, 확인, START, 보상, 닫기"
+                    dynamicFields.addView(textParamInput)
+                    dynamicFields.addView(sectionLabel(context, "터치 유지 시간(ms)"))
+                    if (!preserveValues) durationInput.setText("95")
+                    dynamicFields.addView(durationInput)
+                }
+                ActionType.OCR_LOOP_UNTIL_TEXT -> {
+                    dynamicFields.addView(buildLoadCoordButton())
+                    dynamicFields.addView(sectionLabel(context, "👁️ 멈출 조건: 어떤 글자가 비전 OCR로 인식될 때까지 반복 터치할까요?"))
+                    textParamInput.hint = "예: 성공, 완료, VICTORY, 결과"
+                    dynamicFields.addView(textParamInput)
+                    dynamicFields.addView(sectionLabel(context, "대기 중 반복 터치할 X / Y 좌표"))
+                    dynamicFields.addView(xInput)
+                    dynamicFields.addView(yInput)
+                    dynamicFields.addView(sectionLabel(context, "최대 반복 횟수 및 간격(ms)"))
+                    if (!preserveValues) {
+                        repeatCountInput.setText("25")
+                        repeatIntervalInput.setText("500")
+                    }
+                    dynamicFields.addView(repeatCountInput)
+                    dynamicFields.addView(repeatIntervalInput)
+                }
+                ActionType.BRANCH_IF_TEXT -> {
+                    dynamicFields.addView(sectionLabel(context, "🔀 검사할 화면 텍스트(글자)"))
+                    textParamInput.hint = "예: 강화 성공, 매진, 오류, 완료"
+                    dynamicFields.addView(textParamInput)
+                    dynamicFields.addView(sectionLabel(context, "분기 동작 선택 (진행 / 루프 탈출 / 다음 단계 건너뛰기)"))
+                    dynamicFields.addView(branchSpinner)
+                }
+                ActionType.BRANCH_IF_COLOR -> {
+                    dynamicFields.addView(buildLoadCoordButton())
+                    dynamicFields.addView(sectionLabel(context, "🔀 검사할 X / Y 좌표 및 목표 색상 (#RRGGBB)"))
+                    dynamicFields.addView(xInput)
+                    dynamicFields.addView(yInput)
+                    dynamicFields.addView(colorHexInput)
+                    dynamicFields.addView(sectionLabel(context, "분기 동작 선택 (진행 / 루프 탈출 / 다음 단계 건너뛰기)"))
+                    dynamicFields.addView(branchSpinner)
                 }
                 ActionType.CUSTOM_GESTURE_PATH -> {
                     val savedPath = MacroRepository.getLastRecordedPathJson(context)
@@ -417,8 +653,10 @@ object MacroEditorDialog {
                     }
                     dynamicFields.addView(infoTv)
                     dynamicFields.addView(sectionLabel(context, "재생 시간(ms) 및 반복 횟수"))
-                    durationInput.setText("650")
-                    repeatCountInput.setText("1")
+                    if (!preserveValues) {
+                        durationInput.setText("650")
+                        repeatCountInput.setText("1")
+                    }
                     dynamicFields.addView(durationInput)
                     dynamicFields.addView(repeatCountInput)
                 }
@@ -447,8 +685,10 @@ object MacroEditorDialog {
                     dynamicFields.addView(xInput)
                     dynamicFields.addView(yInput)
                     dynamicFields.addView(sectionLabel(context, "최대 반복 횟수 및 터치 간격(ms)"))
-                    repeatCountInput.setText("30")
-                    repeatIntervalInput.setText("500")
+                    if (!preserveValues) {
+                        repeatCountInput.setText("30")
+                        repeatIntervalInput.setText("500")
+                    }
                     dynamicFields.addView(repeatCountInput)
                     dynamicFields.addView(repeatIntervalInput)
                 }
@@ -486,7 +726,7 @@ object MacroEditorDialog {
                     dynamicFields.addView(x2Input)
                     dynamicFields.addView(y2Input)
                     dynamicFields.addView(sectionLabel(context, "스와이프 시간(ms) 및 반복 횟수"))
-                    durationInput.setText("320")
+                    if (!preserveValues) durationInput.setText("320")
                     dynamicFields.addView(durationInput)
                     dynamicFields.addView(repeatCountInput)
                 }
@@ -507,7 +747,7 @@ object MacroEditorDialog {
                 }
                 ActionType.WAIT -> {
                     dynamicFields.addView(sectionLabel(context, "대기할 시간 (밀리초, 1000 = 1초)"))
-                    durationInput.setText("1000")
+                    if (!preserveValues) durationInput.setText("1000")
                     dynamicFields.addView(durationInput)
                 }
                 ActionType.GLOBAL_ACTION -> {
@@ -516,7 +756,7 @@ object MacroEditorDialog {
                 }
                 ActionType.MEDIA_VOLUME -> {
                     dynamicFields.addView(sectionLabel(context, "설정할 미디어 볼륨 (0 ~ 100%)"))
-                    xInput.setText("30")
+                    if (!preserveValues) xInput.setText("30")
                     dynamicFields.addView(xInput)
                 }
                 ActionType.LAUNCH_APP -> {
@@ -539,18 +779,29 @@ object MacroEditorDialog {
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
-        rebuildFields(actionTypes[0])
+        rebuildFields(actionTypes[initialTypeIdx])
 
         AlertDialog.Builder(context)
-            .setTitle("액션 단계 추가")
+            .setTitle(if (isEditingStep) "액션 단계 수정" else "액션 단계 추가")
             .setView(scroll)
-            .setPositiveButton("추가") { _, _ ->
+            .setPositiveButton(if (isEditingStep) "수정 저장" else "추가") { _, _ ->
                 val type = actionTypes[typeSpinner.selectedItemPosition]
+                val selectedBranchCode = branchOptions[branchSpinner.selectedItemPosition].code
+                val parsedX = when (type) {
+                    ActionType.BRANCH_IF_TEXT -> selectedBranchCode
+                    else -> xInput.text.toString().toIntOrNull() ?: 540
+                }
+                val parsedX2 = when (type) {
+                    ActionType.BRANCH_IF_COLOR -> selectedBranchCode
+                    else -> x2Input.text.toString().toIntOrNull() ?: 540
+                }
+
                 val step = ActionStep(
+                    id = initialStep?.id ?: UUID.randomUUID().toString(),
                     type = type,
-                    x = xInput.text.toString().toIntOrNull() ?: 540,
+                    x = parsedX,
                     y = yInput.text.toString().toIntOrNull() ?: 1200,
-                    x2 = x2Input.text.toString().toIntOrNull() ?: 540,
+                    x2 = parsedX2,
                     y2 = y2Input.text.toString().toIntOrNull() ?: 450,
                     durationMs = durationInput.text.toString().toLongOrNull() ?: 120L,
                     repeatCount = (repeatCountInput.text.toString().toIntOrNull() ?: 1).coerceAtLeast(1),
@@ -559,12 +810,18 @@ object MacroEditorDialog {
                     globalActionName = globalOptions[globalSpinner.selectedItemPosition].name,
                     colorHex = colorHexInput.text.toString().trim().ifBlank { "#38BDF8" },
                     gesturePathJson = if (type == ActionType.CUSTOM_GESTURE_PATH) {
-                        MacroRepository.getLastRecordedPathJson(context)
+                        initialStep?.gesturePathJson?.takeIf { it.isNotBlank() }
+                            ?: MacroRepository.getLastRecordedPathJson(context)
+                    } else {
+                        ""
+                    },
+                    templateJson = if (type == ActionType.CLICK_IMAGE_TEMPLATE || type == ActionType.LOOP_UNTIL_IMAGE) {
+                        activeTemplateJson
                     } else {
                         ""
                     }
                 )
-                onAdded(step)
+                onSaved(step)
             }
             .setNegativeButton("취소", null)
             .show()

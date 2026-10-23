@@ -1,6 +1,7 @@
 package com.mj.aranger.model
 
 import android.accessibilityservice.AccessibilityService
+import com.mj.aranger.engine.VisionOcrEngine
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -45,8 +46,14 @@ enum class ActionType(val title: String) {
     LONG_PRESS_XY("👇 좌표 길게 누르기 (Long Press)"),
     TAP_IF_COLOR("🎨 좌표 픽셀 색상이 일치할 때만 터치"),
     LOOP_UNTIL_COLOR("🎨 좌표 픽셀 색상이 뜰 때까지 대기·터치"),
+    CLICK_IMAGE_TEMPLATE("🖼️ [이미지 서치] 캡처한 아이콘·버튼 이미지를 화면에서 찾아 터치"),
+    LOOP_UNTIL_IMAGE("🖼️ [이미지 대기] 캡처한 아이콘 이미지가 뜰 때까지 대기·터치"),
+    OCR_CLICK_TEXT("👁️ [비전 OCR] 화면 픽셀/글자 인식으로 텍스트 위치 찾아 터치"),
+    OCR_LOOP_UNTIL_TEXT("👁️ [비전 OCR 대기] 화면에 글자가 인식될 때까지 반복 터치"),
+    BRANCH_IF_TEXT("🔀 [조건 분기: 글자] 화면 글자 유무에 따라 진행/건너뛰기/종료"),
+    BRANCH_IF_COLOR("🔀 [조건 분기: 색상] 픽셀 색상 일치 여부에 따라 진행/건너뛰기/종료"),
     CUSTOM_GESTURE_PATH("📹 녹화한 자유 곡선·패턴 제스처 재생"),
-    CLICK_TEXT("🎯 화면 글자·버튼 찾아 클릭"),
+    CLICK_TEXT("🎯 화면 글자·버튼 찾아 클릭 (접근성 노드)"),
     CLICK_VIEW_ID("🧩 뷰 ID(Resource ID) 찾아 클릭"),
     LOOP_UNTIL_TEXT("🔁 특정 글자 뜰 때까지 좌표 반복 터치"),
     SWIPE("👋 화면 스와이프 / 스크롤"),
@@ -62,6 +69,18 @@ enum class ActionType(val title: String) {
     companion object {
         fun fromName(name: String): ActionType =
             entries.find { it.name == name } ?: TAP_XY
+    }
+}
+
+enum class BranchBehavior(val code: Int, val label: String) {
+    CONTINUE_IF_MATCH(0, "✅ 조건 일치 시 계속 진행 / 불일치 시 매크로 즉시 종료"),
+    ABORT_IF_MATCH(1, "🛑 조건 일치 시 매크로 즉시 종료 (무한 루프 탈출)"),
+    SKIP_NEXT_IF_NOT_MATCH(2, "⏭️ IF 조건 일치 시 다음 단계 실행 / 불일치 시 1단계 건너뛰기"),
+    SKIP_NEXT_IF_MATCH(3, "⏭️ 조건 일치 시 바로 다음 1단계 건너뛰기");
+
+    companion object {
+        fun fromCode(code: Int): BranchBehavior =
+            entries.find { it.code == code } ?: CONTINUE_IF_MATCH
     }
 }
 
@@ -115,7 +134,8 @@ data class ActionStep(
     val textParam: String = "",
     val globalActionName: String = GlobalActionOption.BACK.name,
     val colorHex: String = "#38BDF8",
-    val gesturePathJson: String = ""
+    val gesturePathJson: String = "",
+    val templateJson: String = ""
 ) {
     fun toSummary(): String = when (type) {
         ActionType.TAP_XY -> {
@@ -128,6 +148,12 @@ data class ActionStep(
         ActionType.LONG_PRESS_XY -> "👇 좌표 ($x, $y) 길게 누르기 (${durationMs.coerceAtLeast(500L)}ms)"
         ActionType.TAP_IF_COLOR -> "🎨 ($x, $y) 색상이 $colorHex 일 때만 터치"
         ActionType.LOOP_UNTIL_COLOR -> "🎨 ($x, $y) 색상이 $colorHex 될 때까지 대기·터치 (최대 ${repeatCount}회)"
+        ActionType.CLICK_IMAGE_TEMPLATE -> "🖼️ 이미지 서치 터치 [${VisionOcrEngine.getTemplateSummary(templateJson)}]"
+        ActionType.LOOP_UNTIL_IMAGE -> "🖼️ 이미지 뜰 때까지 대기·터치 (최대 ${repeatCount}회) [${VisionOcrEngine.getTemplateSummary(templateJson)}]"
+        ActionType.OCR_CLICK_TEXT -> "👁️ 비전 OCR 텍스트 「$textParam」 찾아 터치"
+        ActionType.OCR_LOOP_UNTIL_TEXT -> "👁️ 비전 OCR 「$textParam」 인식될 때까지 ($x, $y) 반복 터치 (최대 ${repeatCount}회)"
+        ActionType.BRANCH_IF_TEXT -> "🔀 글자 분기 「$textParam」 → ${BranchBehavior.fromCode(x).label}"
+        ActionType.BRANCH_IF_COLOR -> "🔀 색상 분기 ($x,$y = $colorHex) → ${BranchBehavior.fromCode(x2).label}"
         ActionType.CUSTOM_GESTURE_PATH -> "📹 자유 궤적·패턴 제스처 재생 (${durationMs}ms, ${repeatCount}회)"
         ActionType.CLICK_TEXT -> "🎯 화면 글자 「$textParam」 찾아 클릭"
         ActionType.CLICK_VIEW_ID -> "🧩 뷰 ID 「$textParam」 찾아 클릭"
@@ -157,6 +183,7 @@ data class ActionStep(
         put("globalActionName", globalActionName)
         put("colorHex", colorHex)
         put("gesturePathJson", gesturePathJson)
+        put("templateJson", templateJson)
     }
 
     companion object {
@@ -173,7 +200,8 @@ data class ActionStep(
             textParam = obj.optString("textParam", ""),
             globalActionName = obj.optString("globalActionName", GlobalActionOption.BACK.name),
             colorHex = obj.optString("colorHex", "#38BDF8").ifBlank { "#38BDF8" },
-            gesturePathJson = obj.optString("gesturePathJson", "")
+            gesturePathJson = obj.optString("gesturePathJson", ""),
+            templateJson = obj.optString("templateJson", "")
         )
     }
 }
@@ -187,6 +215,8 @@ data class MacroRule(
     val constraintType: ConstraintType = ConstraintType.NONE,
     val constraintParam: String = "",
     val cooldownMs: Long = 1500L,
+    val repeatCount: Int = 1, // 0 = 무한 반복, 1 = 1회 실행, 2+ = N회 반복
+    val repeatDelayMs: Long = 500L,
     val actions: List<ActionStep> = emptyList(),
     val lastRunAt: Long = 0L,
     val runCount: Int = 0
@@ -216,6 +246,12 @@ data class MacroRule(
         ConstraintType.TIME_WINDOW -> "🔍 조건: 시간대 ($constraintParam)일 때만"
     }
 
+    fun repeatSummary(): String = when {
+        repeatCount == 0 -> "♾️ 전체 반복: 무한 반복 (사이클 간격 ${repeatDelayMs}ms)"
+        repeatCount <= 1 -> "🔁 전체 반복: 1회 실행"
+        else -> "🔁 전체 반복: ${repeatCount}회 연속 실행 (사이클 간격 ${repeatDelayMs}ms)"
+    }
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("name", name)
@@ -225,6 +261,8 @@ data class MacroRule(
         put("constraintType", constraintType.name)
         put("constraintParam", constraintParam)
         put("cooldownMs", cooldownMs)
+        put("repeatCount", repeatCount)
+        put("repeatDelayMs", repeatDelayMs)
         put("lastRunAt", lastRunAt)
         put("runCount", runCount)
         val arr = JSONArray()
@@ -248,6 +286,8 @@ data class MacroRule(
                 constraintType = ConstraintType.fromName(obj.optString("constraintType", ConstraintType.NONE.name)),
                 constraintParam = obj.optString("constraintParam", ""),
                 cooldownMs = obj.optLong("cooldownMs", 1500L),
+                repeatCount = obj.optInt("repeatCount", 1).coerceIn(0, 9999),
+                repeatDelayMs = obj.optLong("repeatDelayMs", 500L).coerceAtLeast(100L),
                 actions = stepList,
                 lastRunAt = obj.optLong("lastRunAt", 0L),
                 runCount = obj.optInt("runCount", 0)

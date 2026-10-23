@@ -34,6 +34,7 @@ object MacroRepository {
     private const val KEY_PICKED_VIEW_ID = "picked_view_id"
     private const val KEY_PICKED_COLOR = "picked_color_hex"
     private const val KEY_RECORDED_PATH = "recorded_gesture_path_json"
+    private const val KEY_CAPTURED_TEMPLATE = "captured_image_template_json"
     private const val KEY_INITIALIZED = "initialized_defaults"
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -227,6 +228,29 @@ object MacroRepository {
             LogEntry(
                 macroName = "📹 자유 궤적 녹화",
                 message = "곡선·패턴 포인트 ${pointCount}개 (${durationMs}ms) 저장 완료",
+                isSuccess = true
+            )
+        )
+        notifyChanged()
+    }
+
+    fun getLastCapturedTemplateJson(context: Context): String =
+        prefs(context).getString(KEY_CAPTURED_TEMPLATE, "").orEmpty()
+
+    fun saveCapturedTemplateJson(context: Context, templateJson: String, x: Int, y: Int, centerHex: String = "") {
+        val editor = prefs(context).edit()
+            .putString(KEY_CAPTURED_TEMPLATE, templateJson)
+            .putInt(KEY_PICKED_X, x)
+            .putInt(KEY_PICKED_Y, y)
+        if (centerHex.isNotBlank()) {
+            editor.putString(KEY_PICKED_COLOR, centerHex)
+        }
+        editor.apply()
+        addLog(
+            context,
+            LogEntry(
+                macroName = "🖼️ 이미지 템플릿 캡처",
+                message = "좌표 ($x, $y) 주변 64×64 아이콘/버튼 이미지 조각 저장 완료",
                 isSuccess = true
             )
         )
