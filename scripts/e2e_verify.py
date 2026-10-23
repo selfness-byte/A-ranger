@@ -182,7 +182,10 @@ def volume_key_device():
 
 def press_physical_volume_down(dev):
     """adb `input keyevent`는 접근성 키 필터 뒤에서 주입되어 onKeyEvent에 도달하지 않으므로,
-    커널 입력 장치에 실제 하드웨어 키 이벤트(EV_KEY 114)를 써서 전체 입력 파이프라인을 통과시킵니다."""
+    커널 입력 장치에 실제 하드웨어 키 이벤트(EV_KEY 114)를 써서 전체 입력 파이프라인을 통과시킵니다.
+    화면이 꺼져 있으면 WindowManager가 onKeyEvent를 접근성 서비스로 전달하지 않으므로 먼저 깨웁니다."""
+    adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
+    time.sleep(0.3)
     cmd = (f"sendevent {dev} 1 114 1; sendevent {dev} 0 0 0; "
            f"sleep 0.08; sendevent {dev} 1 114 0; sendevent {dev} 0 0 0")
     adb("shell", cmd)
@@ -255,7 +258,7 @@ def main():
         "constraintType": "NONE", "constraintParam": "", "cooldownMs": 1000,
         "lastRunAt": 0, "runCount": 0,
         "actions": [
-            {"type": "WAIT", "durationMs": 25000},
+            {"type": "WAIT", "durationMs": 29000},
             {"type": "WEBHOOK_HTTP", "textParam": "https://inanimals-1977.web.app/version.json?B_NOT_CANCELLED=1"},
         ],
     }
@@ -286,7 +289,7 @@ def main():
     # ---- 5) 볼륨[↓] 긴급 정지 (VERIFY-B 실행 중) ----
     vol_dev = volume_key_device()
     print(f"   물리 볼륨키 입력 장치: {vol_dev}")
-    time.sleep(max(0, 16 - (time.time() - t0)))
+    time.sleep(max(0, 19.5 - (time.time() - t0)))
     vol_before_panic = music_volume()
     press_physical_volume_down(vol_dev)
     time.sleep(1.2)
