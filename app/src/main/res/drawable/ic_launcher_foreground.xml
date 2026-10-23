@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A-ranger 번개 + 타겟 조준선 심볼 -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M54,22 L32,62 L49,62 L44,86 L76,46 L59,46 Z" />
+    <path
+        android:fillColor="#22C55E"
+        android:pathData="M54,14 A40,40 0 1,0 94,54 L88,54 A34,34 0 1,1 54,20 Z" />
+</vector>

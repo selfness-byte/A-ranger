@@ -1,0 +1,11 @@
+{
+  "appName": "A-ranger Pro",
+  "packageId": "com.mj.aranger",
+  "versionCode": 3,
+  "versionName": "1.2.0",
+  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.2.0.apk",
+  "sha256": "76d43734a5a1ed1dffd132c7bd43c13df7786bb841a683446ac846f3763549b2",
+  "sizeBytes": 5822822,
+  "updatedAt": "2026-10-23",
+  "notes": "• 설정 메뉴 자동 업데이트 센터 탑재: inanimals-1977.web.app 및 GitHub 연동으로 이전 설치 버전에 상관없이 언제나 최신 APK 덮어쓰기 업데이트 지원\n• 실시간 화면 UI 분석기(UI Inspector): 어떤 앱 화면에서든 모든 버튼·글자·숨겨진 View ID·중심 좌표를 스캔하고 1초 만에 매크로로 변환\n• 다중 핀(Multi-Pin) 연속 터치 레코더: 화면 위에 1→2→3→4 번호표를 찍어 연속 터치 매크로 즉시 생성\n• 원클릭 스마트 가드 3종: USB 디버깅/데이터 접근 수락 팝업 자동 허용, 영상/앱 광고 '건너뛰기' 자동 스킵, 화면 꺼짐 방지(Keep Awake)\n• 조건 루프(특정 글자 뜰 때까지 반복 터치), View ID 클릭, 클립보드 즉시 붙여넣기, 매일 정각 스케줄러 및 JSON 전체 백업/복원 지원"
+}
