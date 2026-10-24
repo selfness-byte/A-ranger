@@ -52,6 +52,12 @@ enum class ActionType(val title: String) {
     OCR_LOOP_UNTIL_TEXT("👁️ [비전 OCR 대기] 화면에 글자가 인식될 때까지 반복 터치"),
     BRANCH_IF_TEXT("🔀 [조건 분기: 글자] 화면 글자 유무에 따라 진행/건너뛰기/종료"),
     BRANCH_IF_COLOR("🔀 [조건 분기: 색상] 픽셀 색상 일치 여부에 따라 진행/건너뛰기/종료"),
+    ADB_SHELL_SCRIPT("💻 [ADB 스크립트] input / settings / am / 쉘 명령어 연속 실행"),
+    ADB_KEY_EVENT("⌨️ [ADB 키코드] 엔터·백스페이스·미디어·볼륨·방향키 전송"),
+    SEND_INTENT_DEEPLINK("🔗 [ADB 인텐트/딥링크] 앱 액티비티·URL·시스템 설정창 즉시 점프"),
+    PINCH_ZOOM("🤏 [멀티터치] 두 손가락 핀치 줌인(확대) / 줌아웃(축소)"),
+    CLICK_NOTIFICATION("🔔 [알림 즉시 열기] 상단바를 내리지 않고 수신 알림 바로 클릭"),
+    DEVICE_CONTROL("🎛️ [시스템 제어] 애니메이션 0배속·화면밝기·벨소리·앱정리·TTS 음성"),
     CUSTOM_GESTURE_PATH("📹 녹화한 자유 곡선·패턴 제스처 재생"),
     CLICK_TEXT("🎯 화면 글자·버튼 찾아 클릭 (접근성 노드)"),
     CLICK_VIEW_ID("🧩 뷰 ID(Resource ID) 찾아 클릭"),
@@ -81,6 +87,22 @@ enum class BranchBehavior(val code: Int, val label: String) {
     companion object {
         fun fromCode(code: Int): BranchBehavior =
             entries.find { it.code == code } ?: CONTINUE_IF_MATCH
+    }
+}
+
+enum class DeviceControlOption(val code: Int, val label: String) {
+    ANIM_BOOST_ON(0, "🚀 애니메이션 0.0배속 초고속 부스트 켜기"),
+    ANIM_BOOST_OFF(1, "🔄 애니메이션 1.0배속 기본값 복원"),
+    BRIGHTNESS_SET(2, "🔆 화면 밝기 지정 (1~100%)"),
+    RINGER_NORMAL(3, "🔔 벨소리 모드로 전환"),
+    RINGER_VIBRATE(4, "📳 진동 모드로 전환"),
+    RINGER_SILENT(5, "🔇 무음 모드로 전환"),
+    KILL_BG_APP(6, "🧹 백그라운드 앱 프로세스 강제 종료 (am kill)"),
+    SPEAK_TTS(7, "🗣️ 한국어 음성(TTS) 안내 읽기");
+
+    companion object {
+        fun fromCode(code: Int): DeviceControlOption =
+            entries.find { it.code == code } ?: ANIM_BOOST_ON
     }
 }
 
@@ -154,6 +176,31 @@ data class ActionStep(
         ActionType.OCR_LOOP_UNTIL_TEXT -> "👁️ 비전 OCR 「$textParam」 인식될 때까지 ($x, $y) 반복 터치 (최대 ${repeatCount}회)"
         ActionType.BRANCH_IF_TEXT -> "🔀 글자 분기 「$textParam」 → ${BranchBehavior.fromCode(x).label}"
         ActionType.BRANCH_IF_COLOR -> "🔀 색상 분기 ($x,$y = $colorHex) → ${BranchBehavior.fromCode(x2).label}"
+        ActionType.ADB_SHELL_SCRIPT -> {
+            val firstCmd = textParam.lines()
+                .map { it.trim() }
+                .firstOrNull { it.isNotEmpty() && !it.startsWith("#") } ?: "명령어"
+            val lineCount = textParam.lines()
+                .count { it.trim().isNotEmpty() && !it.trim().startsWith("#") }
+                .coerceAtLeast(1)
+            "💻 ADB 스크립트: 「${firstCmd.take(36)}」 (${lineCount}줄)"
+        }
+        ActionType.ADB_KEY_EVENT -> "⌨️ ADB 키코드 전송: ${textParam.ifBlank { "KEYCODE_ENTER" }} × ${repeatCount}회"
+        ActionType.SEND_INTENT_DEEPLINK -> "🔗 인텐트/딥링크 점프: ${textParam.take(42)}"
+        ActionType.PINCH_ZOOM -> {
+            val dirLabel = if (x2 == 0) "줌인(확대 🔍+)" else "줌아웃(축소 🔍-)"
+            "🤏 멀티터치 $dirLabel 중심($x, $y) 폭 ${y2.coerceIn(180, 900)}px (${durationMs}ms)"
+        }
+        ActionType.CLICK_NOTIFICATION -> "🔔 상단바 알림 즉시 열기: 「${textParam.ifBlank { "최근 수신 알림" }}」"
+        ActionType.DEVICE_CONTROL -> {
+            val opt = DeviceControlOption.fromCode(x)
+            when (opt) {
+                DeviceControlOption.BRIGHTNESS_SET -> "🎛️ 화면 밝기 ${y.coerceIn(1, 100)}% 설정"
+                DeviceControlOption.KILL_BG_APP -> "🎛️ 백그라운드 앱 종료: ${textParam.ifBlank { "대상 앱" }}"
+                DeviceControlOption.SPEAK_TTS -> "🎛️ TTS 음성 안내: 「${textParam.take(28)}」"
+                else -> "🎛️ 시스템 제어: ${opt.label}"
+            }
+        }
         ActionType.CUSTOM_GESTURE_PATH -> "📹 자유 궤적·패턴 제스처 재생 (${durationMs}ms, ${repeatCount}회)"
         ActionType.CLICK_TEXT -> "🎯 화면 글자 「$textParam」 찾아 클릭"
         ActionType.CLICK_VIEW_ID -> "🧩 뷰 ID 「$textParam」 찾아 클릭"

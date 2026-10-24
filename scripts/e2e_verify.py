@@ -185,7 +185,8 @@ def press_physical_volume_down(dev):
     커널 입력 장치에 실제 하드웨어 키 이벤트(EV_KEY 114)를 써서 전체 입력 파이프라인을 통과시킵니다.
     화면이 꺼져 있으면 WindowManager가 onKeyEvent를 접근성 서비스로 전달하지 않으므로 먼저 깨웁니다."""
     adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
-    time.sleep(0.3)
+    adb("shell", "wm", "dismiss-keyguard")
+    time.sleep(0.6)
     cmd = (f"sendevent {dev} 1 114 1; sendevent {dev} 0 0 0; "
            f"sleep 0.08; sendevent {dev} 1 114 0; sendevent {dev} 0 0 0")
     adb("shell", cmd)
@@ -221,6 +222,8 @@ def main():
           replaced_logs[0]["message"] if replaced_logs else "로그 없음")
 
     # ---- 기준 픽셀 색상 및 이미지 템플릿 측정 (MainActivity 좌측 여백) ----
+    adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
+    adb("shell", "wm", "dismiss-keyguard")
     adb("shell", "am", "start", "-n", f"{PKG}/.ui.MainActivity")
     time.sleep(2.5)
     px, py = 18, 1500
@@ -246,6 +249,9 @@ def main():
             {"type": "CUSTOM_GESTURE_PATH", "durationMs": 320, "repeatCount": 1, "gesturePathJson": path_json},
             {"type": "CLICK_IMAGE_TEMPLATE", "x": px, "y": py, "x2": 36, "durationMs": 60, "templateJson": tpl_json},
             {"type": "OCR_CLICK_TEXT", "textParam": "A-ranger", "durationMs": 60},
+            {"type": "ADB_SHELL_SCRIPT", "textParam": "settings put global window_animation_scale 0.0\ngetprop ro.product.model"},
+            {"type": "PINCH_ZOOM", "x": 540, "y": 1400, "x2": 0, "y2": 360, "durationMs": 260},
+            {"type": "DEVICE_CONTROL", "x": 1, "y": 80, "textParam": ""},
             {"type": "BRANCH_IF_COLOR", "x": px, "y": py, "x2": 2, "colorHex": "#FF00FF"},
             {"type": "WEBHOOK_HTTP", "textParam": "https://inanimals-1977.web.app/version.json?SHOULD_BE_SKIPPED=1"},
             {"type": "WEBHOOK_HTTP", "textParam": "https://inanimals-1977.web.app/version.json?verify={time}&pkg={pkg}"},
@@ -258,7 +264,7 @@ def main():
         "constraintType": "NONE", "constraintParam": "", "cooldownMs": 1000,
         "lastRunAt": 0, "runCount": 0,
         "actions": [
-            {"type": "WAIT", "durationMs": 29000},
+            {"type": "WAIT", "durationMs": 33000},
             {"type": "WEBHOOK_HTTP", "textParam": "https://inanimals-1977.web.app/version.json?B_NOT_CANCELLED=1"},
         ],
     }
@@ -289,12 +295,12 @@ def main():
     # ---- 5) 볼륨[↓] 긴급 정지 (VERIFY-B 실행 중) ----
     vol_dev = volume_key_device()
     print(f"   물리 볼륨키 입력 장치: {vol_dev}")
-    time.sleep(max(0, 19.5 - (time.time() - t0)))
+    time.sleep(max(0, 21.5 - (time.time() - t0)))
     vol_before_panic = music_volume()
     press_physical_volume_down(vol_dev)
     time.sleep(1.2)
     vol_after_panic = music_volume()
-    time.sleep(13)
+    time.sleep(14)
 
     cur = read_prefs()
     entries = logs(cur)
@@ -305,6 +311,7 @@ def main():
     a_fail_steps = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "미수행" in e["message"]]
     img_matched = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "이미지 매칭 성공" in e["message"]]
     ocr_matched = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "비전 OCR" in e["message"]]
+    adb_script_logs = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "ADB 스크립트" in e["message"]]
     skip_logged = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "다음 단계" in e["message"] and "건너뜀" in e["message"]]
     skipped_hook_fired = any("SHOULD_BE_SKIPPED" in e["message"] for e in entries)
     abort_logged = [e["message"] for e in entries if e["macroName"] == "VERIFY-A" and "매크로가 종료되었습니다" in e["message"]]
@@ -316,10 +323,15 @@ def main():
           bool(img_matched), img_matched[0] if img_matched else "이미지 매칭 로그 없음")
     check("2d. 👁️ 하이브리드 온디바이스 비전 OCR 터치 (OCR_CLICK_TEXT)",
           bool(ocr_matched), ocr_matched[0] if ocr_matched else "비전 OCR 로그 없음")
-    check("2e. 🔀 조건 분기 SKIP_NEXT (조건 불일치 시 다음 단계 건너뛰기)",
+    check("2e. 💻 온디바이스 ADB 스크립트 연속 실행 (ADB_SHELL_SCRIPT)",
+          bool(adb_script_logs), adb_script_logs[0] if adb_script_logs else "ADB 스크립트 로그 없음")
+    check("2f. 🤏 멀티터치 핀치 줌 & 🎛️ 시스템 제어 (PINCH_ZOOM / DEVICE_CONTROL)",
+          a_started and not any("단계 8 " in m or "단계 9 " in m for m in a_fail_steps),
+          "2-finger Pinch Zoom + 애니메이션 배율 복원 성공")
+    check("2g. 🔀 조건 분기 SKIP_NEXT (조건 불일치 시 다음 단계 건너뛰기)",
           bool(skip_logged) and not skipped_hook_fired,
           skip_logged[0] if skip_logged else "SKIP_NEXT 로그 없음")
-    check("2f. 🔀 조건 분기 ABORT_MACRO (3회 반복 루프 조건부 탈출)",
+    check("2h. 🔀 조건 분기 ABORT_MACRO (3회 반복 루프 조건부 탈출)",
           bool(abort_logged) and len(img_matched) == 1,
           abort_logged[0] if abort_logged else "ABORT_MACRO 로그 없음")
     check("3.  📹 자유 궤적 제스처 재생", a_started and not any("단계 4 " in m for m in a_fail_steps))

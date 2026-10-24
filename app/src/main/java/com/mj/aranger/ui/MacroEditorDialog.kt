@@ -24,6 +24,7 @@ import com.mj.aranger.model.ActionStep
 import com.mj.aranger.model.ActionType
 import com.mj.aranger.model.BranchBehavior
 import com.mj.aranger.model.ConstraintType
+import com.mj.aranger.model.DeviceControlOption
 import com.mj.aranger.model.GlobalActionOption
 import com.mj.aranger.model.MacroRule
 import com.mj.aranger.model.TriggerType
@@ -288,7 +289,7 @@ object MacroEditorDialog {
         renderActions()
 
         val addActionBtn = TextView(context).apply {
-            text = "+ 화면 제어 / 비전 / 조건분기 액션 추가"
+            text = "+ 화면 제어 / 비전 / ADB 파워 액션 추가"
             gravity = Gravity.CENTER
             setTextColor(Color.parseColor("#0F172A"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
@@ -430,6 +431,21 @@ object MacroEditorDialog {
             branchSpinner.setSelection(bIdx)
         }
 
+        val deviceControlOptions = DeviceControlOption.entries
+        val deviceControlSpinner = styledSpinner(context, deviceControlOptions.map { it.label })
+        if (initialStep != null && initialStep.type == ActionType.DEVICE_CONTROL) {
+            val dIdx = deviceControlOptions.indexOfFirst { it.code == initialStep.x }.coerceAtLeast(0)
+            deviceControlSpinner.setSelection(dIdx)
+        }
+
+        val pinchDirSpinner = styledSpinner(
+            context,
+            listOf("🔍+ 줌인 (두 손가락 벌려 화면 확대)", "🔍- 줌아웃 (두 손가락 오므려 화면 축소)")
+        )
+        if (initialStep != null && initialStep.type == ActionType.PINCH_ZOOM) {
+            pinchDirSpinner.setSelection(if (initialStep.x2 == 0) 0 else 1)
+        }
+
         fun buildLoadCoordButton(): View = TextView(context).apply {
             val pt = MacroRepository.getPickedPoint(context)
             val hex = MacroRepository.getPickedColorHex(context)
@@ -527,6 +543,9 @@ object MacroEditorDialog {
             dynamicFields.removeAllViews()
             val preserveValues = isEditingStep && firstRender
             firstRender = false
+            textParamInput.inputType = InputType.TYPE_CLASS_TEXT
+            textParamInput.minLines = 1
+            textParamInput.gravity = Gravity.CENTER_VERTICAL or Gravity.START
 
             when (selected) {
                 ActionType.TAP_XY -> {
@@ -638,6 +657,125 @@ object MacroEditorDialog {
                     dynamicFields.addView(colorHexInput)
                     dynamicFields.addView(sectionLabel(context, "분기 동작 선택 (진행 / 루프 탈출 / 다음 단계 건너뛰기)"))
                     dynamicFields.addView(branchSpinner)
+                }
+                ActionType.ADB_SHELL_SCRIPT -> {
+                    dynamicFields.addView(sectionLabel(context, "💻 빠른 ADB 명령어 프리셋 삽입"))
+                    val presetRow1 = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                    presetRow1.addView(smallActionButton(context, "+ input tap", "#0284C7") {
+                        val cur = textParamInput.text.toString()
+                        val pt = MacroRepository.getPickedPoint(context)
+                        textParamInput.setText((if (cur.isBlank()) "" else "$cur\n") + "input tap ${pt.first} ${pt.second}")
+                    })
+                    presetRow1.addView(smallActionButton(context, "+ input swipe", "#0D9488") {
+                        val cur = textParamInput.text.toString()
+                        textParamInput.setText((if (cur.isBlank()) "" else "$cur\n") + "input swipe 540 1600 540 500 300")
+                    })
+                    presetRow1.addView(smallActionButton(context, "+ 0배속 부스트", "#7C3AED") {
+                        val cur = textParamInput.text.toString()
+                        val cmd = "settings put global window_animation_scale 0.0\nsettings put global transition_animation_scale 0.0\nsettings put global animator_duration_scale 0.0"
+                        textParamInput.setText((if (cur.isBlank()) "" else "$cur\n") + cmd)
+                    })
+                    dynamicFields.addView(presetRow1)
+
+                    dynamicFields.addView(sectionLabel(context, "실행할 ADB 스크립트 (여러 줄 입력 가능, adb shell 접두사 자동 처리)"))
+                    textParamInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                    textParamInput.minLines = 4
+                    textParamInput.gravity = Gravity.TOP or Gravity.START
+                    textParamInput.hint = "예:\ninput tap 540 1200\nsleep 300\ninput keyevent KEYCODE_ENTER\nsettings put global window_animation_scale 0.0"
+                    dynamicFields.addView(textParamInput)
+                }
+                ActionType.ADB_KEY_EVENT -> {
+                    dynamicFields.addView(sectionLabel(context, "⌨️ 자주 쓰는 ADB 하드웨어 키코드 빠른 선택"))
+                    val keyRow1 = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                    keyRow1.addView(smallActionButton(context, "⏎ 엔터(검색)", "#0284C7") {
+                        textParamInput.setText("KEYCODE_ENTER")
+                    })
+                    keyRow1.addView(smallActionButton(context, "⌫ 백스페이스", "#334155") {
+                        textParamInput.setText("KEYCODE_DEL")
+                    })
+                    keyRow1.addView(smallActionButton(context, "⏯ 재생/일시정지", "#0D9488") {
+                        textParamInput.setText("KEYCODE_MEDIA_PLAY_PAUSE")
+                    })
+                    keyRow1.addView(smallActionButton(context, "⏭ 다음곡", "#7C3AED") {
+                        textParamInput.setText("KEYCODE_MEDIA_NEXT")
+                    })
+                    dynamicFields.addView(keyRow1)
+
+                    val keyRow2 = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        setPadding(0, dp(context, 4), 0, 0)
+                    }
+                    keyRow2.addView(smallActionButton(context, "🔊 볼륨+", "#334155") {
+                        textParamInput.setText("KEYCODE_VOLUME_UP")
+                    })
+                    keyRow2.addView(smallActionButton(context, "🔉 볼륨-", "#334155") {
+                        textParamInput.setText("KEYCODE_VOLUME_DOWN")
+                    })
+                    keyRow2.addView(smallActionButton(context, "🏠 홈", "#334155") {
+                        textParamInput.setText("KEYCODE_HOME")
+                    })
+                    keyRow2.addView(smallActionButton(context, "📸 캡처", "#334155") {
+                        textParamInput.setText("KEYCODE_SYSRQ")
+                    })
+                    dynamicFields.addView(keyRow2)
+
+                    dynamicFields.addView(sectionLabel(context, "전송할 ADB 키코드 이름 또는 번호"))
+                    if (!preserveValues && textParamInput.text.isEmpty()) {
+                        textParamInput.setText("KEYCODE_ENTER")
+                    }
+                    textParamInput.hint = "예: KEYCODE_ENTER, KEYCODE_DEL, KEYCODE_MEDIA_PLAY_PAUSE, 66"
+                    dynamicFields.addView(textParamInput)
+                    dynamicFields.addView(sectionLabel(context, "반복 전송 횟수 및 간격(ms)"))
+                    dynamicFields.addView(repeatCountInput)
+                    dynamicFields.addView(repeatIntervalInput)
+                }
+                ActionType.SEND_INTENT_DEEPLINK -> {
+                    dynamicFields.addView(sectionLabel(context, "🔗 빠른 시스템 설정창 / 딥링크 프리셋"))
+                    val linkRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                    linkRow.addView(smallActionButton(context, "📶 Wi-Fi 설정", "#0284C7") {
+                        textParamInput.setText("android.settings.WIFI_SETTINGS")
+                    })
+                    linkRow.addView(smallActionButton(context, "🛠️ 개발자 옵션", "#7C3AED") {
+                        textParamInput.setText("android.settings.APPLICATION_DEVELOPMENT_SETTINGS")
+                    })
+                    linkRow.addView(smallActionButton(context, "♿ 접근성 설정", "#0D9488") {
+                        textParamInput.setText("android.settings.ACCESSIBILITY_SETTINGS")
+                    })
+                    dynamicFields.addView(linkRow)
+
+                    dynamicFields.addView(sectionLabel(context, "이동할 딥링크 URI / URL / 시스템 액션 / 패키지/액티비티"))
+                    textParamInput.hint = "예: https://m.naver.com, kakaotalk://, android.settings.WIFI_SETTINGS"
+                    dynamicFields.addView(textParamInput)
+                }
+                ActionType.PINCH_ZOOM -> {
+                    dynamicFields.addView(buildLoadCoordButton())
+                    dynamicFields.addView(sectionLabel(context, "🤏 멀티터치 줌 방향 선택"))
+                    dynamicFields.addView(pinchDirSpinner)
+                    dynamicFields.addView(sectionLabel(context, "핀치 중심 좌표 (X, Y)"))
+                    dynamicFields.addView(xInput)
+                    dynamicFields.addView(yInput)
+                    dynamicFields.addView(sectionLabel(context, "손가락 이동 폭 px (기본 420) 및 동작 시간 ms (기본 400)"))
+                    if (!preserveValues) {
+                        y2Input.setText("420")
+                        durationInput.setText("400")
+                    }
+                    dynamicFields.addView(y2Input)
+                    dynamicFields.addView(durationInput)
+                }
+                ActionType.CLICK_NOTIFICATION -> {
+                    dynamicFields.addView(sectionLabel(context, "🔔 상단바를 내리지 않고 즉시 열 알림 키워드 (비워두면 가장 최근 알림 실행)"))
+                    textParamInput.hint = "예: 카카오톡, 택배, 인증, 입금 (비워두면 최근 수신 알림)"
+                    dynamicFields.addView(textParamInput)
+                }
+                ActionType.DEVICE_CONTROL -> {
+                    dynamicFields.addView(sectionLabel(context, "🎛️ 실행할 시스템 제어 항목 선택"))
+                    dynamicFields.addView(deviceControlSpinner)
+                    dynamicFields.addView(sectionLabel(context, "화면 밝기 값 (1~100%, '화면 밝기 지정' 선택 시 적용)"))
+                    if (!preserveValues) yInput.setText("80")
+                    dynamicFields.addView(yInput)
+                    dynamicFields.addView(sectionLabel(context, "대상 앱 이름/패키지명 또는 TTS 읽을 문구 ({noti}, {time} 지원)"))
+                    textParamInput.hint = "예: youtube (앱 종료 시) 또는 매크로 작업이 완료되었습니다 (TTS 선택 시)"
+                    dynamicFields.addView(textParamInput)
                 }
                 ActionType.CUSTOM_GESTURE_PATH -> {
                     val savedPath = MacroRepository.getLastRecordedPathJson(context)
@@ -787,12 +925,15 @@ object MacroEditorDialog {
             .setPositiveButton(if (isEditingStep) "수정 저장" else "추가") { _, _ ->
                 val type = actionTypes[typeSpinner.selectedItemPosition]
                 val selectedBranchCode = branchOptions[branchSpinner.selectedItemPosition].code
+                val selectedDeviceCtrlCode = deviceControlOptions[deviceControlSpinner.selectedItemPosition].code
                 val parsedX = when (type) {
                     ActionType.BRANCH_IF_TEXT -> selectedBranchCode
+                    ActionType.DEVICE_CONTROL -> selectedDeviceCtrlCode
                     else -> xInput.text.toString().toIntOrNull() ?: 540
                 }
                 val parsedX2 = when (type) {
                     ActionType.BRANCH_IF_COLOR -> selectedBranchCode
+                    ActionType.PINCH_ZOOM -> pinchDirSpinner.selectedItemPosition
                     else -> x2Input.text.toString().toIntOrNull() ?: 540
                 }
 

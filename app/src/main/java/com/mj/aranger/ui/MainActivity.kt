@@ -26,13 +26,18 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.lifecycleScope
+import com.mj.aranger.engine.AdbPowerController
 import com.mj.aranger.engine.MacroEngine
+import com.mj.aranger.model.ActionStep
+import com.mj.aranger.model.ActionType
 import com.mj.aranger.model.MacroRule
+import com.mj.aranger.model.TriggerType
 import com.mj.aranger.service.ARangerAccessibilityService
 import com.mj.aranger.service.ARangerNotificationService
 import com.mj.aranger.service.FloatingOverlayService
 import com.mj.aranger.store.MacroRepository
 import com.mj.aranger.update.AppUpdater
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
@@ -138,7 +143,7 @@ class MainActivity : AppCompatActivity() {
             setTypeface(typeface, Typeface.BOLD)
         }
         val subTv = TextView(this).apply {
-            text = "v$curName · 이미지서치 · 비전OCR · 무한루프/분기 · 스포이드 · 자가복구"
+            text = "v$curName · ADB파워엔진 · 이미지서치 · 비전OCR · 무한루프 · 스포이드"
             setTextColor(Color.parseColor("#94A3B8"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
         }
@@ -411,7 +416,168 @@ class MainActivity : AppCompatActivity() {
             }
         )
 
+        card.addView(
+            buildGuardToggleRow(
+                title = "🚀 [ADB] 시스템 애니메이션 0.0배속 초고속 부스트",
+                subtitle = "창·전환·애니메이터 배율을 0.0x로 설정해 앱 전환 및 매크로 인식 속도를 극대화",
+                checked = AdbPowerController.isZeroAnimationBoostEnabled(this)
+            ) { isChecked ->
+                val ok = AdbPowerController.setZeroAnimationBoost(this, isChecked)
+                if (!ok) {
+                    Toast.makeText(this, "WRITE_SECURE_SETTINGS 권한이 필요합니다.", Toast.LENGTH_SHORT).show()
+                }
+                renderScreen()
+            }
+        )
+
+        card.addView(
+            buildGuardToggleRow(
+                title = "🔌 [ADB] 충전 중 화면 절대 안 꺼짐 (Stay Awake)",
+                subtitle = "시스템 Global stay_on_while_plugged_in=7 설정으로 충전 시 24시간 화면 유지",
+                checked = AdbPowerController.isStayAwakePluggedEnabled(this)
+            ) { isChecked ->
+                AdbPowerController.setStayAwakePlugged(this, isChecked)
+                renderScreen()
+            }
+        )
+
+        val adbConsoleBtn = TextView(this).apply {
+            text = "💻 온디바이스 ADB 쉘 콘솔 & 스크립트 실행기 열기"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(12), dp(11), dp(12), dp(11))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(10).toFloat()
+                setColor(Color.parseColor("#0F766E"))
+                setStroke(dp(1), Color.parseColor("#2DD4BF"))
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(4)
+            }
+            setOnClickListener {
+                showAdbConsoleDialog()
+            }
+        }
+        card.addView(adbConsoleBtn)
+
         return card
+    }
+
+    private fun showAdbConsoleDialog() {
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(Color.parseColor("#0F172A"))
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+        }
+        scroll.addView(box)
+
+        val guideTv = TextView(this).apply {
+            text = "PC 연결 없이 스마트폰에서 직접 input tap/swipe/pinch/keyevent, settings get/put, am start/kill 및 리눅스 쉘 명령어를 즉시 실행하거나 매크로로 저장할 수 있습니다."
+            setTextColor(Color.parseColor("#94A3B8"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(0, 0, 0, dp(10))
+        }
+        box.addView(guideTv)
+
+        val scriptInput = EditText(this).apply {
+            val pt = MacroRepository.getPickedPoint(this@MainActivity)
+            setText("getprop ro.product.model\nsettings get global window_animation_scale\n# input tap ${pt.first} ${pt.second}")
+            setTextColor(Color.parseColor("#38BDF8"))
+            setHintTextColor(Color.parseColor("#64748B"))
+            setBackgroundColor(Color.parseColor("#1E293B"))
+            textSize = 13f
+            minLines = 4
+            maxLines = 8
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+
+        val presetRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, dp(8))
+        }
+        presetRow.addView(createCardActionButton("🔋 배터리정보", "#334155") {
+            scriptInput.setText("dumpsys battery | head -n 12")
+        })
+        presetRow.addView(space(4))
+        presetRow.addView(createCardActionButton("🚀 0배속부스트", "#7C3AED") {
+            scriptInput.setText(
+                "settings put global window_animation_scale 0.0\n" +
+                    "settings put global transition_animation_scale 0.0\n" +
+                    "settings put global animator_duration_scale 0.0"
+            )
+        })
+        presetRow.addView(space(4))
+        presetRow.addView(createCardActionButton("👆 타겟터치", "#0284C7") {
+            val pt = MacroRepository.getPickedPoint(this)
+            scriptInput.setText("input tap ${pt.first} ${pt.second}")
+        })
+        box.addView(presetRow)
+        box.addView(scriptInput)
+
+        val outTitle = TextView(this).apply {
+            text = "📟 실행 결과 출력:"
+            setTextColor(Color.parseColor("#E2E8F0"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(10), 0, dp(4))
+        }
+        box.addView(outTitle)
+
+        val outputTv = TextView(this).apply {
+            text = "명령어를 입력하고 아래 [▶ 즉시 실행] 버튼을 누르세요."
+            setTextColor(Color.parseColor("#A7F3D0"))
+            setBackgroundColor(Color.parseColor("#020617"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            typeface = Typeface.MONOSPACE
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        box.addView(outputTv)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("💻 온디바이스 ADB 파워 콘솔")
+            .setView(scroll)
+            .setPositiveButton("▶ 즉시 실행", null)
+            .setNeutralButton("⚡ 매크로로 저장") { _, _ ->
+                val script = scriptInput.text.toString().trim()
+                if (script.isNotEmpty()) {
+                    val rule = MacroRule(
+                        name = "💻 ADB 스크립트 자동 실행",
+                        enabled = true,
+                        triggerType = TriggerType.MANUAL_FLOATING,
+                        actions = listOf(
+                            ActionStep(
+                                type = ActionType.ADB_SHELL_SCRIPT,
+                                textParam = script
+                            )
+                        )
+                    )
+                    MacroRepository.upsertMacro(this, rule)
+                    Toast.makeText(this, "✅ ADB 스크립트 매크로가 추가되었습니다!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("닫기", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val script = scriptInput.text.toString()
+                outputTv.text = "⏳ 실행 중..."
+                lifecycleScope.launch {
+                    val res = AdbPowerController.executeAdbScript(this@MainActivity, script)
+                    outputTv.text = res.output
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun buildGuardToggleRow(

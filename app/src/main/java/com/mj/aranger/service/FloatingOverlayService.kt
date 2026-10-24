@@ -174,7 +174,7 @@ class FloatingOverlayService : Service() {
         }
 
         val notification = builder
-            .setContentTitle("A-ranger Pro v1.4 화면 제어·비전 리모컨 실행 중")
+            .setContentTitle("A-ranger Pro v1.5 화면 제어·비전·ADB 리모컨 실행 중")
             .setContentText("터치하여 A-ranger 대시보드 열기")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(pendingIntent)
@@ -237,6 +237,15 @@ class FloatingOverlayService : Service() {
         val picked = MacroRepository.getPickedPoint(this)
         val pickedColor = MacroRepository.getPickedColorHex(this)
 
+        val expandedBody = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val minimizedBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+        }
+
         val headerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -260,12 +269,32 @@ class FloatingOverlayService : Service() {
             setTextColor(Color.parseColor("#38BDF8"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setTypeface(typeface, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         coordLabel = header
         headerRow.addView(header)
-        root.addView(headerRow)
+        headerRow.addView(spaceView(6))
 
-        // 메인 버튼 행: [▶ 실행] [⏹ 정지] [🎯 조준] [📹 궤적] [🔍 분석] [✕]
+        val btnMinimize = createChipButton("➖ 접기", "#334155") {
+            expandedBody.visibility = View.GONE
+            minimizedBar.visibility = View.VISIBLE
+        }
+        headerRow.addView(btnMinimize)
+        expandedBody.addView(headerRow)
+
+        val btnExpand = createChipButton("⚡ A-ranger 펼치기", "#0284C7") {
+            minimizedBar.visibility = View.GONE
+            expandedBody.visibility = View.VISIBLE
+        }
+        val btnMiniStop = createChipButton("⏹", "#DC2626") {
+            MacroEngine.stopAllExecutions(this)
+        }
+        minimizedBar.addView(btnExpand)
+        minimizedBar.addView(spaceView(4))
+        minimizedBar.addView(btnMiniStop)
+        root.addView(minimizedBar)
+
+        // 메인 버튼 행: [▶ 실행] [⏹ 정지] [📋 목록] [🎯 조준] [📹 궤적] [🔍 분석] [✕]
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -276,6 +305,9 @@ class FloatingOverlayService : Service() {
         }
         val btnStop = createChipButton("⏹ 정지", "#DC2626") {
             MacroEngine.stopAllExecutions(this)
+        }
+        val btnList = createChipButton("📋 목록", "#0284C7") {
+            showMacroQuickRunnerOverlay()
         }
         val btnTarget = createChipButton("🎯 조준", "#D97706") {
             toggleCrosshair()
@@ -294,6 +326,8 @@ class FloatingOverlayService : Service() {
         buttonRow.addView(spaceView(4))
         buttonRow.addView(btnStop)
         buttonRow.addView(spaceView(4))
+        buttonRow.addView(btnList)
+        buttonRow.addView(spaceView(4))
         buttonRow.addView(btnTarget)
         buttonRow.addView(spaceView(4))
         buttonRow.addView(btnPathRec)
@@ -301,7 +335,7 @@ class FloatingOverlayService : Service() {
         buttonRow.addView(btnInspect)
         buttonRow.addView(spaceView(4))
         buttonRow.addView(btnClose)
-        root.addView(buttonRow)
+        expandedBody.addView(buttonRow)
 
         // 서브 레코더 컨테이너 (조준기가 켜졌을 때만 2줄로 깔끔하게 표시)
         val recorderCol = LinearLayout(this).apply {
@@ -358,7 +392,8 @@ class FloatingOverlayService : Service() {
         recorderCol.addView(visionRow)
         recorderCol.addView(pinRow)
         subRecorderRow = recorderCol
-        root.addView(recorderCol)
+        expandedBody.addView(recorderCol)
+        root.addView(expandedBody)
 
         // 패널 드래그 이동 처리
         var startX = 0
@@ -1113,6 +1148,111 @@ class FloatingOverlayService : Service() {
             "✅ 「${rule.name}」 매크로가 즉시 생성되었습니다!",
             Toast.LENGTH_LONG
         ).show()
+    }
+
+    private fun showMacroQuickRunnerOverlay() {
+        removeInspectorModal()
+        val macros = MacroRepository.getMacros(this)
+        val dm = resources.displayMetrics
+
+        val params = WindowManager.LayoutParams(
+            (dm.widthPixels * 0.90).toInt(),
+            (dm.heightPixels * 0.58).toInt(),
+            overlayWindowType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+        }
+
+        val modal = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(16).toFloat()
+                setColor(Color.parseColor("#F50F172A"))
+                setStroke(dp(2), Color.parseColor("#38BDF8"))
+            }
+        }
+
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(8))
+        }
+        val titleTv = TextView(this).apply {
+            text = "📋 저장된 매크로 즉시 실행 (${macros.size}개)"
+            setTextColor(Color.parseColor("#38BDF8"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
+            setTypeface(typeface, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val closeBtn = createChipButton("닫기 ✕", "#475569") {
+            removeInspectorModal()
+        }
+        topBar.addView(titleTv)
+        topBar.addView(closeBtn)
+        modal.addView(topBar)
+
+        val scroll = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        }
+        val listCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        scroll.addView(listCol)
+
+        macros.forEach { rule ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(10).toFloat()
+                    setColor(Color.parseColor("#1E293B"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = dp(6)
+                }
+            }
+
+            val infoCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val nameTv = TextView(this).apply {
+                text = rule.name
+                setTextColor(Color.parseColor("#F8FAFC"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+                setTypeface(typeface, Typeface.BOLD)
+            }
+            val subTv = TextView(this).apply {
+                text = "${rule.triggerSummary()} · ${rule.actions.size}단계"
+                setTextColor(Color.parseColor("#94A3B8"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
+            }
+            infoCol.addView(nameTv)
+            infoCol.addView(subTv)
+            row.addView(infoCol)
+
+            val runBtn = createChipButton("▶ 실행", "#16A34A") {
+                removeInspectorModal()
+                MacroEngine.runSingleMacroNow(this, rule)
+                Toast.makeText(this, "▶ 「${rule.name}」 즉시 실행!", Toast.LENGTH_SHORT).show()
+            }
+            row.addView(runBtn)
+            listCol.addView(row)
+        }
+
+        modal.addView(scroll)
+        inspectorView = modal
+        windowManager.addView(modal, params)
     }
 
     private fun removeInspectorModal() {

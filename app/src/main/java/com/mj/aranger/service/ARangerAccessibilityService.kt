@@ -92,7 +92,7 @@ class ARangerAccessibilityService : AccessibilityService(), SensorEventListener 
             this,
             LogEntry(
                 macroName = "접근성 서비스",
-                message = "A-ranger Pro 화면 제어 & 비전 엔진(v1.4)이 연결되었습니다.",
+                message = "A-ranger Pro 화면 제어·비전·ADB 파워 엔진(v1.5)이 연결되었습니다.",
                 isSuccess = true
             )
         )
@@ -757,6 +757,114 @@ class ARangerAccessibilityService : AccessibilityService(), SensorEventListener 
             }
         }
         return true
+    }
+
+    /**
+     * 🤏 두 손가락 멀티터치 핀치 줌인(확대) / 줌아웃(축소) 제스처를 수행합니다.
+     */
+    suspend fun performPinch(
+        centerX: Int,
+        centerY: Int,
+        zoomIn: Boolean,
+        spanPx: Int = 340,
+        durationMs: Long = 380L
+    ): Boolean = suspendCancellableCoroutine { cont ->
+        try {
+            val dm = resources.displayMetrics
+            val sw = dm.widthPixels.coerceAtLeast(300)
+            val sh = dm.heightPixels.coerceAtLeast(400)
+            val cx = centerX.coerceIn(120, sw - 120)
+            val cy = centerY.coerceIn(160, sh - 160)
+            val innerOffset = 55
+            val outerOffset = spanPx.coerceIn(120, minOf(cx - 20, sw - cx - 20, cy - 20, sh - cy - 20).coerceAtLeast(130))
+
+            val f1StartX = if (zoomIn) (cx - innerOffset).toFloat() else (cx - outerOffset).toFloat()
+            val f1StartY = if (zoomIn) (cy - innerOffset).toFloat() else (cy - outerOffset).toFloat()
+            val f1EndX = if (zoomIn) (cx - outerOffset).toFloat() else (cx - innerOffset).toFloat()
+            val f1EndY = if (zoomIn) (cy - outerOffset).toFloat() else (cy - innerOffset).toFloat()
+
+            val f2StartX = if (zoomIn) (cx + innerOffset).toFloat() else (cx + outerOffset).toFloat()
+            val f2StartY = if (zoomIn) (cy + innerOffset).toFloat() else (cy + outerOffset).toFloat()
+            val f2EndX = if (zoomIn) (cx + outerOffset).toFloat() else (cx + innerOffset).toFloat()
+            val f2EndY = if (zoomIn) (cy + outerOffset).toFloat() else (cy + innerOffset).toFloat()
+
+            val path1 = Path().apply {
+                moveTo(f1StartX, f1StartY)
+                lineTo(f1EndX, f1EndY)
+            }
+            val path2 = Path().apply {
+                moveTo(f2StartX, f2StartY)
+                lineTo(f2EndX, f2EndY)
+            }
+            val safeDur = humanizeDuration(durationMs.coerceIn(100L, 4000L))
+            val stroke1 = GestureDescription.StrokeDescription(path1, 0L, safeDur)
+            val stroke2 = GestureDescription.StrokeDescription(path2, 0L, safeDur)
+            val gesture = GestureDescription.Builder()
+                .addStroke(stroke1)
+                .addStroke(stroke2)
+                .build()
+
+            val dispatched = dispatchGesture(
+                gesture,
+                object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        if (cont.isActive) cont.resume(true)
+                    }
+
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        if (cont.isActive) cont.resume(false)
+                    }
+                },
+                null
+            )
+            if (!dispatched && cont.isActive) {
+                cont.resume(false)
+            }
+        } catch (_: Exception) {
+            if (cont.isActive) cont.resume(false)
+        }
+    }
+
+    /**
+     * ⌨️ 포커스된 입력창에서 IME 엔터(검색/전송/줄바꿈) 동작을 수행합니다.
+     */
+    fun performImeEnter(): Boolean {
+        for (root in getTargetRoots() + listOfNotNull(rootInActiveWindow)) {
+            val targetNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                ?: findEditableNode(root, 0)
+            if (targetNode != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    if (targetNode.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) {
+                        return true
+                    }
+                }
+                val current = targetNode.text?.toString().orEmpty()
+                val args = Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "$current\n")
+                }
+                return targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            }
+        }
+        return false
+    }
+
+    /**
+     * ⌫ 포커스된 입력창에서 마지막 글자 1개를 지웁니다 (KEYCODE_DEL 대체).
+     */
+    fun performBackspace(): Boolean {
+        for (root in getTargetRoots() + listOfNotNull(rootInActiveWindow)) {
+            val targetNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
+                ?: findEditableNode(root, 0)
+            if (targetNode != null) {
+                val cur = targetNode.text?.toString().orEmpty()
+                val next = if (cur.isNotEmpty()) cur.dropLast(1) else ""
+                val args = Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, next)
+                }
+                return targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            }
+        }
+        return false
     }
 
     private fun findEditableNode(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {

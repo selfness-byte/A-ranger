@@ -16,11 +16,13 @@ import com.mj.aranger.model.ActionStep
 import com.mj.aranger.model.ActionType
 import com.mj.aranger.model.BranchBehavior
 import com.mj.aranger.model.ConstraintType
+import com.mj.aranger.model.DeviceControlOption
 import com.mj.aranger.model.GlobalActionOption
 import com.mj.aranger.model.LogEntry
 import com.mj.aranger.model.MacroRule
 import com.mj.aranger.model.TriggerType
 import com.mj.aranger.service.ARangerAccessibilityService
+import com.mj.aranger.service.ARangerNotificationService
 import com.mj.aranger.store.MacroRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -591,6 +593,70 @@ object MacroEngine {
                     ARangerAccessibilityService.colorsMatch(currentHex, step.colorHex)
                 val behavior = BranchBehavior.fromCode(step.x2)
                 resolveBranchOutcome(matched, behavior)
+            }
+            ActionType.ADB_SHELL_SCRIPT -> {
+                val res = AdbPowerController.executeAdbScript(context, step.textParam)
+                val firstOut = res.output.lines().firstOrNull { it.isNotBlank() }?.take(80) ?: "완료"
+                MacroRepository.addLog(
+                    context,
+                    LogEntry(
+                        macroName = macroName,
+                        message = "💻 ADB 스크립트 (${res.commandCount}줄): $firstOut",
+                        isSuccess = res.isSuccess
+                    )
+                )
+                res.isSuccess.toOutcome()
+            }
+            ActionType.ADB_KEY_EVENT -> {
+                val count = step.repeatCount.coerceIn(1, 200)
+                var allOk = true
+                for (i in 0 until count) {
+                    val ok = AdbPowerController.dispatchAdbKeyEvent(context, step.textParam)
+                    if (!ok) allOk = false
+                    if (i < count - 1) {
+                        delay(humanizeInterval(context, step.repeatIntervalMs.coerceAtLeast(80L)))
+                    }
+                }
+                allOk.toOutcome()
+            }
+            ActionType.SEND_INTENT_DEEPLINK -> {
+                val expanded = expandTemplateVars(step.textParam)
+                AdbPowerController.launchDeepLinkOrIntent(context, expanded).toOutcome()
+            }
+            ActionType.PINCH_ZOOM -> {
+                val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED
+                val zoomIn = step.x2 == 0
+                val span = step.y2.coerceIn(180, 900)
+                svc.performPinch(step.x, step.y, zoomIn, span, step.durationMs).toOutcome()
+            }
+            ActionType.CLICK_NOTIFICATION -> {
+                val nSvc = ARangerNotificationService.instance ?: return StepOutcome.FAILED
+                val ok = nSvc.clickNotificationByKeyword(step.textParam)
+                if (ok) {
+                    MacroRepository.addLog(
+                        context,
+                        LogEntry(
+                            macroName = macroName,
+                            message = "🔔 상단바 알림 즉시 열기 완료: 「${step.textParam.ifBlank { "최근 알림" }}」",
+                            isSuccess = true
+                        )
+                    )
+                }
+                ok.toOutcome()
+            }
+            ActionType.DEVICE_CONTROL -> {
+                val opt = DeviceControlOption.fromCode(step.x)
+                val ok = when (opt) {
+                    DeviceControlOption.ANIM_BOOST_ON -> AdbPowerController.setZeroAnimationBoost(context, true)
+                    DeviceControlOption.ANIM_BOOST_OFF -> AdbPowerController.setZeroAnimationBoost(context, false)
+                    DeviceControlOption.BRIGHTNESS_SET -> AdbPowerController.setScreenBrightnessPercent(context, step.y.coerceIn(1, 100))
+                    DeviceControlOption.RINGER_NORMAL -> AdbPowerController.setRingerMode(context, 0)
+                    DeviceControlOption.RINGER_VIBRATE -> AdbPowerController.setRingerMode(context, 1)
+                    DeviceControlOption.RINGER_SILENT -> AdbPowerController.setRingerMode(context, 2)
+                    DeviceControlOption.KILL_BG_APP -> AdbPowerController.killBackgroundApp(context, step.textParam)
+                    DeviceControlOption.SPEAK_TTS -> AdbPowerController.speakTts(context, expandTemplateVars(step.textParam))
+                }
+                ok.toOutcome()
             }
             ActionType.CUSTOM_GESTURE_PATH -> {
                 val svc = ARangerAccessibilityService.instance ?: return StepOutcome.FAILED

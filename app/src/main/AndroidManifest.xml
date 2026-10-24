@@ -17,9 +17,21 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 진동 피드백 및 액션 -->
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- ADB 부여 시 접근성 서비스 자가 치유(Self-Healing)를 위한 시스템 보안 설정 권한 -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+    <!-- ADB 부여 시 접근성 서비스 자가 치유(Self-Healing) 및 ADB급 시스템 제어를 위한 권한 -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission
+        android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission
+        android:name="android.permission.DUMP"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
     <!-- 설치된 앱 패키지 목록 조회 및 실행 -->
     <uses-permission

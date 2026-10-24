@@ -26,18 +26,23 @@ cp "$NRM_BUILD_ROOT/ARanger/app/outputs/apk/debug/app-debug.apk" "$PROJECT/dist/
 cp "$NRM_BUILD_ROOT/ARanger/app/outputs/apk/debug/app-debug.apk" "$PROJECT/dist/A-ranger-1.2.0.apk"
 cp "$NRM_BUILD_ROOT/ARanger/app/outputs/apk/debug/app-debug.apk" "$PROJECT/dist/A-ranger-1.3.1.apk"
 cp "$NRM_BUILD_ROOT/ARanger/app/outputs/apk/debug/app-debug.apk" "$PROJECT/dist/A-ranger-1.4.0.apk"
-echo "APK 생성 완료: $PROJECT/dist/A-ranger-1.4.0.apk"
+cp "$NRM_BUILD_ROOT/ARanger/app/outputs/apk/debug/app-debug.apk" "$PROJECT/dist/A-ranger-1.5.0.apk"
+echo "APK 생성 완료: $PROJECT/dist/A-ranger-1.5.0.apk"
 
 if [ "$1" = "--install" ]; then
-  adb install -r -g "$PROJECT/dist/A-ranger-1.4.0.apk"
+  adb install -r -g "$PROJECT/dist/A-ranger-1.5.0.apk"
 
-  # 1. 다른 앱 위에 표시(플로팅 리모컨) & 앱 내 자동 업데이트 설치 권한 허용
+  # 1. 다른 앱 위에 표시(플로팅 리모컨) & 앱 내 자동 업데이트 & 시스템 설정 변경 권한 허용
   adb shell appops set com.mj.aranger SYSTEM_ALERT_WINDOW allow 2>/dev/null || true
   adb shell appops set com.mj.aranger REQUEST_INSTALL_PACKAGES allow 2>/dev/null || true
   adb shell appops set com.mj.aranger ACCESS_RESTRICTED_SETTINGS allow 2>/dev/null || true
+  adb shell appops set com.mj.aranger WRITE_SETTINGS allow 2>/dev/null || true
+  adb shell appops set com.mj.aranger GET_USAGE_STATS allow 2>/dev/null || true
 
-  # 2. 24시간 자가 복구(Self-Healing)를 위한 WRITE_SECURE_SETTINGS 및 배터리 최적화 제외 허용
+  # 2. 24시간 자가 복구 및 ADB 파워 컨트롤을 위한 WRITE_SECURE_SETTINGS / DUMP / 배터리 최적화 제외 허용
   adb shell pm grant com.mj.aranger android.permission.WRITE_SECURE_SETTINGS 2>/dev/null || true
+  adb shell pm grant com.mj.aranger android.permission.DUMP 2>/dev/null || true
+  adb shell pm grant com.mj.aranger android.permission.PACKAGE_USAGE_STATS 2>/dev/null || true
   adb shell dumpsys deviceidle whitelist +com.mj.aranger 2>/dev/null || true
 
   # 3. 알림 리스너 권한 자동 허용

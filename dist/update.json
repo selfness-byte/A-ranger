@@ -1,11 +1,11 @@
 {
   "appName": "A-ranger Pro",
   "packageId": "com.mj.aranger",
-  "versionCode": 6,
-  "versionName": "1.4.0",
-  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.4.0.apk",
-  "sha256": "eaaf6786dcd261c69109baf30771a5ea57164f6d4ea56df0f3cad5473cd66202",
-  "sizeBytes": 5969313,
-  "updatedAt": "2026-10-23",
-  "notes": "• [신규] 🖼️ 화면 이미지(아이콘·버튼 조각) 캡처 및 고속 피라미드 템플릿 서치 터치 (위치가 바뀌는 게임·앱 버튼 자동 추적)\n• [신규] 👁️ 하이브리드 온디바이스 비전 글자 인식(OCR) 터치 및 대기 액션 (접근성 노드가 없는 캔버스·게임 글자 인식)\n• [신규] ♾️ 매크로 전체 시퀀스 무한 반복(0) / N회 연속 반복 루프 및 사이클 간격 설정\n• [신규] 🔀 조건 분기(IF/ELSE/루프 탈출) 액션 (화면 글자·픽셀 색상 일치 여부에 따라 매크로 즉시 종료 또는 다음 1단계 건너뛰기)\n• [신규] ✏️ 등록된 액션 단계 개별 수정(Edit) · 📋 복제(Copy) · ▲/▼ 양방향 순서 변경 지원"
+  "versionCode": 7,
+  "versionName": "1.5.0",
+  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.5.0.apk",
+  "sha256": "ef750f0d69cc569edf02c2f73453b5ea4496b6e7a945dbee20574232c4ba720f",
+  "sizeBytes": 5920114,
+  "updatedAt": "2026-10-24",
+  "notes": "• [신규] 💻 온디바이스 ADB 쉘 콘솔 & 스크립트 연속 실행 (PC 연결 없이 input tap/swipe/pinch/keyevent, settings get/put, am start/kill 및 쉘 명령어 실행)\n• [신규] 🚀 시스템 애니메이션 0.0배속 초고속 부스트 및 🔌 충전 중 화면 절대 안 꺼짐(Stay Awake) 원클릭 ADB 스위치\n• [신규] 🤏 두 손가락 멀티터치 핀치 줌인(확대) / 줌아웃(축소) 제스처 액션\n• [신규] ⌨️ ADB 하드웨어 키코드 전송 (엔터/검색, 백스페이스, 미디어 재생/다음곡, 볼륨, 캡처) 및 🔗 인텐트/딥링크 즉시 점프\n• [신규] 🔔 상단바를 내리지 않고 수신 알림 즉시 열기(PendingIntent 직행) & 🎛️ 디바이스 시스템 제어 (화면밝기·벨소리/진동/무음·백그라운드 앱 종료·한국어 TTS 음성 안내)\n• [신규] 플로팅 리모컨 [➖ 접기/펼치기] 미니 모드 및 [📋 목록] 매크로 퀵 런처 탑재"
 }
