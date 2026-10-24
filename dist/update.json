@@ -1,11 +1,11 @@
 {
   "appName": "A-ranger Pro",
   "packageId": "com.mj.aranger",
-  "versionCode": 9,
-  "versionName": "1.5.2",
-  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.5.2.apk",
-  "sha256": "4a4609af4dd90829d59fabda13791494b8367cc684b692c49c9017d1c2262eb3",
-  "sizeBytes": 5952762,
+  "versionCode": 10,
+  "versionName": "1.5.3",
+  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.5.3.apk",
+  "sha256": "f8e2d72c5df6e10993ffe10ddd18e2b83e5a0dd6a5383797ed80a59bade47977",
+  "sizeBytes": 5967234,
   "updatedAt": "2026-10-24",
-  "notes": "메모리 사용 및 장시간 실행 안정성 개선. 같은 매크로의 중복 실행 방지, 화면 캡처·OCR 취소 시 자원 정리와 서비스 종료 처리 보강. 설정·로그 처리의 불필요한 메모리 할당과 화면 갱신 감소."
+  "notes": "폰 화면에서 메뉴 버튼이 겹치거나 화면 밖으로 잘리던 문제를 수정했습니다. 상단 제목과 제어 버튼을 나누고 탭·매크로·ADB·편집기 버튼을 화면 폭에 맞춰 자동 줄바꿈합니다. 시스템 표시줄과 화면 잘림 영역의 여백을 반영하고 플로팅 메뉴를 사용 가능한 화면 안에 배치합니다. 가로 화면과 낮은 화면에서는 메뉴 내용을 스크롤할 수 있으며, 분석·캡처·녹화 화면을 열 때 다른 플로팅 메뉴가 겹치지 않도록 개선했습니다."
 }
