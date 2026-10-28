@@ -1,11 +1,11 @@
 {
   "appName": "A-ranger Pro",
   "packageId": "com.mj.aranger",
-  "versionCode": 14,
-  "versionName": "1.5.7",
-  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.5.7.apk",
-  "sha256": "f8f941cd60ea59426fcb338483a26033dc59b9147ffb5ec4153ba3a50e3dc25a",
-  "sizeBytes": 5993662,
+  "versionCode": 15,
+  "versionName": "1.5.8",
+  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.5.8.apk",
+  "sha256": "3aca94da6cf630b28831160d1915eb32793d2f2d05df626450ef116d7b934f05",
+  "sizeBytes": 5994166,
   "updatedAt": "2026-10-29",
-  "notes": "긴급 정지·엔진 OFF 시 실행 취소와 자동 재발동 차단, 다시 켜기 전의 대기 작업 무효화, 화면 캡처 취소·재연결 후 요청 간격 안정화."
+  "notes": "화면 하단 관리 카드에 업데이트 확인 버튼 추가. 기존 백업·복원 및 설치 확인 절차 유지."
 }
