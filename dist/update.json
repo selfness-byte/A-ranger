@@ -1,11 +1,11 @@
 {
   "appName": "A-ranger Pro",
   "packageId": "com.mj.aranger",
-  "versionCode": 12,
-  "versionName": "1.5.5",
-  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.5.5.apk",
-  "sha256": "de60393ae1e4f90f4b92f940698e17da4826b9a92654c8af5fa341b248f10cfe",
-  "sizeBytes": 5992942,
+  "versionCode": 13,
+  "versionName": "1.5.6",
+  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.5.6.apk",
+  "sha256": "2ee51e7f1e029d58b44c1466c6352dc3ca83dea31d379fbd8c5c0759318a1a54",
+  "sizeBytes": 5988550,
   "updatedAt": "2026-10-29",
-  "notes": "알림 문자열의 명령 삽입 방지, 편집값 보존, 실제 앱 전환 감지, 자동 확인 OFF에서도 이전 APK 정리."
+  "notes": "상단 업데이트 버튼과 설정·업데이트 탭 제거, 백업·복원 및 권한 관리 메뉴를 화면 하단으로 이동."
 }
