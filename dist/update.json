@@ -1,11 +1,11 @@
 {
-  "appName": "A-ranger Pro",
   "packageId": "com.mj.aranger",
-  "versionCode": 15,
-  "versionName": "1.5.8",
-  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.5.8.apk",
-  "sha256": "3aca94da6cf630b28831160d1915eb32793d2f2d05df626450ef116d7b934f05",
-  "sizeBytes": 5994166,
-  "updatedAt": "2026-10-29",
-  "notes": "화면 하단 관리 카드에 업데이트 확인 버튼 추가. 기존 백업·복원 및 설치 확인 절차 유지."
+  "versionName": "1.5.9",
+  "versionCode": 16,
+  "sha256": "680ff213052dc7e314adc1a30137b42b185c5a6b0aa311a6f008dd88ee809c3f",
+  "sizeBytes": 5993834,
+  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.5.9.apk",
+  "notes": "글자 자동 조작에서 접근성으로 확인한 실제 위치를 이미지 추정보다 먼저 사용하고, 유효하지 않은 좌표는 건너뜁니다. 최신 버전을 다시 설치할 때 버전 번호가 바뀌지 않는 이유를 명확히 안내합니다.",
+  "appName": "A-ranger Pro",
+  "updatedAt": "2026-10-29"
 }
