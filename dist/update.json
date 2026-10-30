@@ -1,11 +1,11 @@
 {
   "packageId": "com.mj.aranger",
-  "versionName": "1.6.1",
-  "versionCode": 19,
-  "sha256": "554161a31ba99a4572619c4dda05444cbcced5591cc84f49387f4ac11d0cf268",
-  "sizeBytes": 6097002,
-  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.6.1.apk",
-  "notes": "잘못된 작업 목록이나 알 수 없는 동작이 들어 있는 백업은 저장 전에 거절하도록 개선했습니다. 분석한 버튼의 전체 ID를 유지해 완전 일치 선택의 정확도를 높였고, 창 정보를 읽지 못하면 다른 창의 대상을 선택하지 않도록 보강했습니다. 실행 중인 매크로에 중복 요청이 들어올 때 불필요한 작업 자료 복사를 줄였습니다.",
+  "versionName": "1.6.2",
+  "versionCode": 20,
+  "sha256": "4c7ee1c512866aaac003bb05ee241b89f3f4f46ae6ee33174539e385726c720b",
+  "sizeBytes": 6106866,
+  "apkUrl": "https://raw.githubusercontent.com/selfness-byte/A-ranger/main/dist/A-ranger-1.6.2.apk",
+  "notes": "복원 실패 시 입력과 커서를 유지하고 오류를 표시합니다. 최근 실행 상태 최대 32개를 전체 보기에서 확인합니다. 없는 작업·빈 작업·순환 호출·8단계 초과 호출은 첫 동작 전에 차단하며, 실행 준비 시 연결된 작업 목록만 복사합니다. 호출 구성 오류는 분기나 실패 건너뛰기 설정과 관계없이 시작 전에 검사합니다.",
   "appName": "A-ranger Pro",
-  "updatedAt": "2026-10-29"
+  "updatedAt": "2026-10-30"
 }
